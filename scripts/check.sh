@@ -17,6 +17,15 @@ else
 fi
 
 echo
+echo "== curve parity (Bench JS vs make-tone-lut.py) =="
+if command -v node >/dev/null; then
+	./tests/curve-parity.py
+else
+	echo "node not installed — SKIPPING. This is the check that catches the Bench's preview"
+	echo "silently diverging from the renderer; do not treat a skip as a pass."
+fi
+
+echo
 echo "== bats =="
 if command -v bats >/dev/null; then
 	bats tests/
