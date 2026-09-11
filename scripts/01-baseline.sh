@@ -18,6 +18,15 @@ LUT="$ROOT/luts/apple/AppleLogToRec709-v1.0.cube"
 OUT="$ROOT/dist/01-baseline/${CLIP}_baseline.mov"
 
 [ -f "$SRC" ] || { echo "source not found: $SRC" >&2; exit 1; }
+# Apple's CST is NOT in this repo — it is not redistributable (see luts/apple/SOURCE.txt). On a
+# fresh clone it will be missing, so say so precisely rather than letting ffmpeg fail on a path.
+[ -f "$LUT" ] || {
+	echo "Apple's Log->Rec709 LUT is missing:" >&2
+	echo "  $LUT" >&2
+	echo "It is deliberately not committed — Apple's licence does not permit redistributing it." >&2
+	echo "Download it (free Apple ID, ~2 min) per luts/apple/SOURCE.txt, then re-run." >&2
+	exit 1
+}
 check_disk_space "$ROOT/dist" 10
 
 FILTER="lut3d=file='${LUT}':interp=tetrahedral"

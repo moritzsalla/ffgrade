@@ -41,8 +41,15 @@ filmic tone map -> Rec.709). That route is implemented in
 scripts/make-filmic-lut.py but is NOT what ships — see docs/PIPELINE.md,
 "Approach A", for why it lost to the simpler path.
 
-Licence / redistribution
-------------------------
-Apple's, downloaded under the Apple Developer Agreement. Kept here for this
-project's own use. Don't redistribute the .cube files outside it — anyone who
-needs them can pull them from the URL above with a free Apple ID.
+Licence / redistribution — NOT IN THIS REPO
+-------------------------------------------
+The .cube files are deliberately NOT committed and are listed in .gitignore.
+They are Apple's, obtained under the Apple Developer Agreement, and this repo is
+public: committing them would be redistribution.
+
+This costs a fresh clone nothing but two minutes. scripts/01-baseline.sh checks
+for the file and, if it is absent, prints this file's path and stops — rather
+than failing somewhere inside ffmpeg with a path error.
+
+They were briefly committed early on and have since been purged from the
+history, so `git log` will not show them.

@@ -49,6 +49,12 @@ Searched and rejected: cinecolor.io, freepresets.com, presetpro.com (all gated
 behind email signup or paid), DocM88/Free-Lut-Pack (.xmp Lightroom presets only,
 not .cube).
 
-Licence
--------
-Upstream repo's terms. Check the repo before redistributing.
+Licence — MIT, and these ARE committed
+--------------------------------------
+YahiaAngelo/Film-Luts is MIT licensed, which permits redistribution provided the
+copyright notice travels with it. The upstream notice is therefore kept beside
+the .cube files as LICENSE-Film-Luts.txt (Copyright (c) 2024 Yahia).
+
+This is the opposite of luts/apple/, which is NOT redistributable and is
+gitignored. If you add another look LUT, check its terms before committing it —
+most "free" LUT packs are free-to-use, not free-to-redistribute.
