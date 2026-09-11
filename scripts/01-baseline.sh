@@ -4,7 +4,7 @@
 #   ROTATE_FIX: "none" (default) — trust ffmpeg's autorotate against the file's own display
 #               matrix, which is correct for most clips — or "180" if a preview check shows the
 #               autorotated result is upside down anyway (seen once, on IMG_0609; NOT assumed to
-#               apply to every clip — see docs/PIPELINE.md and BATCH-RUNBOOK.md).
+#               apply to every clip — see docs/PIPELINE.md and BATCH_RUNBOOK.md).
 # DO NOT default this to "180" in a batch loop — confirm per clip with a preview frame first.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -46,7 +46,7 @@ need its own correction.
 
 For vertical delivery this is a real problem: 11 clips can't go to 9:16 without discarding roughly
 two-thirds of the frame width, and a script handed a landscape master will *silently* squash it
-rather than error (fixed now — see BATCH-RUNBOOK — but it produced convincing-looking garbage
+rather than error (fixed now — see BATCH_RUNBOOK — but it produced convincing-looking garbage
 first).
 
 **If the output is Reels/Stories, shoot vertical.** If a shot genuinely wants to be landscape,

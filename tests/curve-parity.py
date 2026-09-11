@@ -6,7 +6,7 @@ WHY THIS IS THE MOST IMPORTANT TEST IN THE PROJECT
 --------------------------------------------------
 The Bench (bench/index.html) reimplements the tone curve in JavaScript so it can preview a grade
 at interactive speed. The pipeline generates the real LUT in Python. They are two implementations
-of one formula, and the ENTIRE grading workflow rests on them agreeing: Moritz grades by eye in
+of one formula, and the ENTIRE grading workflow rests on them agreeing: a person grades by eye in
 the browser, sends the parameters, and the renderer applies them. If the two drift, the preview
 silently stops predicting the render — no error, no warning, just a grade that looks right in the
 Bench and wrong in the output, with nothing to point at.

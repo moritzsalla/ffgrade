@@ -74,7 +74,7 @@ for SRC in "${CLIPS[@]}"; do
 	case "${ROT:-none}" in
 		90)  FIX=",vflip,hflip" ;;   # +90: autorotate lands it upside down. Only IMG_0609 so far.
 		-90) FIX="" ;;               # -90: autorotate alone is correct.
-		*)   say "SKIP  $CLIP — landscape (no rotation matrix). Needs a framing decision; see BATCH-RUNBOOK."
+		*)   say "SKIP  $CLIP — landscape (no rotation matrix). Needs a framing decision; see BATCH_RUNBOOK."
 		     SKIPPED=$((SKIPPED+1)); continue ;;
 	esac
 

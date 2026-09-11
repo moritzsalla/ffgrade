@@ -102,7 +102,7 @@ require_portrait() {
 		echo "REFUSING: $file is ${w}x${h} (landscape)." >&2
 		echo "  Vertical delivery would silently squash it. A landscape clip needs a framing" >&2
 		echo "  decision first (centre-crop to vertical / pillarbox / exclude) — see" >&2
-		echo "  docs/BATCH-RUNBOOK.md, 'Mixed orientation'." >&2
+		echo "  docs/BATCH_RUNBOOK.md, 'Mixed orientation'." >&2
 		return 1
 	fi
 }

@@ -9,8 +9,8 @@ them stay here. `CONTEXT.md` is the vocabulary.
 
 Cinematic-looking Instagram posts (Reels/Stories, 9:16) from iPhone ProRes 422 HQ / Apple Log
 source, 4K24, locked stabilization. Consistent look across posts (Kodak Portra emulation).
-Working clip: IMG_0609.mov, the guinea pig ("Versuchskaninchen") for the whole recipe before
-it's run across the rest of the shoot.
+Working clip: IMG_0609.mov — the test clip the whole recipe was developed against before
+being run across the rest of the shoot.
 
 ## Folder structure & naming convention
 
@@ -72,7 +72,7 @@ Purely technical, zero creative judgment:
   shot) at full resolution → R174.0 G176.2 B176.7, within ~1.5% — effectively neutral, no
   correction applied. (An earlier visual read off a downscaled thumbnail suggested a warm cast;
   that was wrong. Measure the actual pixels before correcting anything — a small preview can lie.)
-  Capture used **locked** WB and focus (per Moritz, confirmed) — so unlike auto WB, this should
+  Capture used **locked** WB and focus (confirmed) — so unlike auto WB, this should
   hold consistent across every clip in the shoot rather than drifting per-scene. IMG_0609's
   near-neutral reading is therefore a reasonable baseline expectation for the other 17 clips too,
   though still worth a spot-check on one or two (a locked value can still read differently under
@@ -85,7 +85,7 @@ Purely technical, zero creative judgment:
 
 ### Diagnosing "too bright" (Portra pass, v1 → v2)
 
-Moritz flagged the graded output as too bright despite correct in-phone exposure — worth ruling
+The graded output was flagged as too bright despite correct in-phone exposure — worth ruling
 out a real pipeline bug before touching the grade. Checked, in order:
 
 - **Color range mismatch** (a common cause of exactly this symptom — limited/full range confusion

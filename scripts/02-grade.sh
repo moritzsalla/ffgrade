@@ -4,7 +4,7 @@
 # Reads dist/01-baseline/<clip>_baseline.mov, writes dist/02-graded/<clip>_graded.mov.
 #
 # THE TONE LUT IS THE POINT. The Portra LUT alone leaves the image far too bright and flat
-# ("milky"): nothing reaches black and the whole frame sits ~25% too high. GRADE.cube fixes that.
+# ("milky"): nothing reaches black and the whole frame sits ~25% too high. shipped.cube fixes that.
 # Don't drop it thinking it's redundant — see docs/PIPELINE.md, "Tone shaping".
 #
 # WHY mergeplanes: the tone curve is applied to the LUMA PLANE ONLY, with the original chroma
@@ -26,12 +26,12 @@ CLIP="$1"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BASELINE="$ROOT/dist/01-baseline/${CLIP}_baseline.mov"
 LUT="$ROOT/luts/looks/kodak_portra_400_nc.cube"
-TONE="$ROOT/luts/tone/GRADE.cube"
+TONE="$ROOT/luts/tone/shipped.cube"
 # Graded by eye in the Grade Bench (bench), calibrated live against the RAL references in
 # frame, then sent back through the artifact db. Deliberately off-spec: saturation 1.27 puts the
 # traffic blue at B/G 2.39 against a 1.98 spec. That is a grade, not an error — accuracy is the
-# reference you depart from on purpose. Regenerate GRADE.cube with:
-#   ./make-tone-lut.py ../../luts/tone/GRADE.cube --gamma 2.02 --pivot 0.39 --contrast 1.09 \
+# reference you depart from on purpose. Regenerate shipped.cube with:
+#   ./make-tone-lut.py ../../luts/tone/shipped.cube --gamma 2.02 --pivot 0.39 --contrast 1.09 \
 #                      --toe 0.00 --shoulder 0.10 --black 0.025
 # (v2, after review: black point lifted 0.015 -> 0.025 and gamma eased 2.09 -> 2.02 to open
 #  shadow detail. `toe` was measured to do NOTHING at pivot 0.39 — identical percentiles at 0.07

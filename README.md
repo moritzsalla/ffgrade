@@ -1,12 +1,15 @@
-# Automated iPhone prores color grading pipeline & workbench
-
-## What this is
+# ProRes Grading Pipeline
 
 A repeatable pipeline for turning iPhone ProRes / Apple Log footage into Instagram posts that look
-deliberately graded rather than like phone video. Shot 11 Sep 2026, Den Brielstraat, Amsterdam —
-19 clips, iPhone 15 Pro, Final Cut Camera app, AirDropped.
+deliberately graded rather than like phone video — plus a browser workbench for setting the look
+by eye, calibrated against colours whose values are legally defined.
 
 Deliverables per clip: **Reels/Stories** (9:16, 1080×1920) and **Feed** (4:5, 1080×1350).
+
+![The Grade Bench](docs/grade-bench.png)
+
+The reference footage throughout this documentation is a 19-clip set shot on an iPhone 15 Pro in
+the Final Cut Camera app: ProRes 422 HQ, Apple Log, 4K24, locked white balance and focus.
 
 ## Why it's built this way
 
@@ -23,11 +26,23 @@ looked flat because it sat ~25% too bright with nothing reaching black, and beca
 LUT supplies a print emulation, not a cinema tone response. Chasing colour was wasted effort;
 shaping tone was the whole fix.
 
-**Calibrate against things whose colour is legally defined.** Rather than grade purely by eye, the
+**Calibrate against things whose colour is legally defined.**
+
+| | |
+|---|---|
+| ![Traffic signs](docs/reference-traffic-signs.png) | ![Licence plate](docs/reference-licence-plate.png) |
+| Dutch traffic signage — RAL 3020 red, RAL 5017 blue | Dutch plate yellow — RAL 1021 |
+
+Rather than grade purely by eye, the
 frame is sampled at objects with published specs — Dutch licence-plate yellow (RAL 1021), traffic
 red (RAL 3020), traffic blue (RAL 5017) — plus a neutral surface. That converts "does this look
 right" into a measurement. It catches the failure mode where a contrast curve quietly turns signage
 neon, and it caught several confident-but-wrong judgements made by eye during development.
+
+![Grade ladder](docs/grade-ladder-variants.png)
+
+*A strength ladder: the same frame at four points along one parameter. Comparisons like this are
+how every decision in `docs/PIPELINE.md` was settled — the numbers beside them, not instead.*
 
 **But accuracy is not a grade.** The references say where you are, not where to go. The shipped
 look deliberately sits off-spec (saturation 1.27 puts the blue at 2.39). That is intent, not error.
@@ -35,11 +50,10 @@ The tooling exists to make the departure _visible and chosen_, not to prevent it
 
 ## How the work splits
 
-Measurement and rendering are Claude's; the look is Moritz's. The two meet in
+Measurement and rendering are automated; the look is a human call. The two meet in
 **`bench/`** — a browser tool (published as an Artifact) with real-time sliders over the
 actual frame, live readouts of every RAL reference beside them, and a button that sends the chosen
-settings straight back to Claude. One grading session replaces a round trip per adjustment, and the
-numbers transfer to the pipeline verbatim because the tool's curve maths is a port of
+settings straight back to Claude. One grading session replaces a round trip per adjustment, and the numbers transfer to the pipeline verbatim because the tool's curve maths is a port of
 `make-tone-lut.py`.
 
 ## Layout
@@ -55,7 +69,7 @@ bench/          The Grade Bench: source of truth for the browser tool (published
 luts/
   apple/          Apple's official Log→Rec709 and Log→Lin LUTs (free Apple ID download).
   looks/          Film-emulation look LUTs. See SOURCE.txt for provenance.
-  tone/           GRADE.cube — the one tone curve that ships.
+  tone/           shipped.cube — the one tone curve that ships.
     variants/     The 14 candidates the search passed through. Kept as evidence, not in use.
   filmic/         Output of the rejected log→linear→filmic route. See ADR-0002.
 dist/            Generated. Safe to delete and re-render; nothing here is a source.
@@ -66,8 +80,10 @@ dist/            Generated. Safe to delete and re-render; nothing here is a sour
   stab/           Camera-motion transforms (.trf), per clip. Motion-only, so they survive a re-grade.
 docs/
   PIPELINE.md       Every finding, measurement, dead end and mistake. The real documentation.
-  BATCH-RUNBOOK.md  Per-clip procedure, how to run a grading session, what must NOT be batched.
-  SHOOTING-NOTES.md Capture-side lessons — what to change on the next shoot, before the grade.
+  BATCH_RUNBOOK.md  Per-clip procedure, how to run a grading session, what must NOT be batched.
+  SHOOTING_NOTES.md Capture-side lessons — what to change on the next shoot, before the grade.
+  HOW_TO_SHOOT.md   The camera settings, in plain language for whoever is holding the phone.
+  BACKLOG.md        Everything raised and not finished, and what was declined and why.
   adr/              The decisions that would otherwise get "fixed" by a later reader.
 tests/            bats suite over the safety layer. Run via scripts/check.sh.
 CONTEXT.md        The project's own vocabulary, one term per concept, and the words ruled out.

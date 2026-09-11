@@ -39,7 +39,7 @@ Known limitations — read before swapping these around
 2. They emulate a photographic PRINT of an already-developed image, not a cinema
    tone response applied to scene-linear light. They supply colour character and
    almost no contrast — which is exactly why this pipeline needs a separate tone
-   stage (luts/tone/GRADE.cube). Don't expect a film look from the LUT alone.
+   stage (luts/tone/shipped.cube). Don't expect a film look from the LUT alone.
 3. Every free Portra LUT reachable without a gated download turned out to be the
    same 13^3 G'MIC grid, so "find a better one" was a dead end. A genuinely
    better look would be a print-film emulation (Kodak 2383-class), which expects
@@ -53,7 +53,7 @@ Licence — MIT, and these ARE committed
 --------------------------------------
 YahiaAngelo/Film-Luts is MIT licensed, which permits redistribution provided the
 copyright notice travels with it. The upstream notice is therefore kept beside
-the .cube files as LICENSE-Film-Luts.txt (Copyright (c) 2024 Yahia).
+the .cube files as LICENSE_FILM_LUTS.txt (Copyright (c) 2024 Yahia).
 
 This is the opposite of luts/apple/, which is NOT redistributable and is
 gitignored. If you add another look LUT, check its terms before committing it —

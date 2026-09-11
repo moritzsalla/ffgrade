@@ -2,7 +2,7 @@ Filmic route LUTs — generated, and NOT in use
 =============================================
 
 These are the output of a rejected approach. They are kept as the evidence behind
-ADR-0002 (docs/adr/0002-keep-apples-cst.md), not because anything reads them.
+ADR-0002 (docs/adr/0002_KEEP_APPLES_CST.md), not because anything reads them.
 Nothing in scripts/ references this folder.
 
 What they are
