@@ -11,7 +11,18 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 echo "== shellcheck =="
 if command -v shellcheck >/dev/null; then
-	(cd scripts && shellcheck -x -s bash ./*.sh) && echo "clean"
+	# Lint by SHEBANG, not by extension — scripts/grade has no .sh suffix and was silently
+	# excluded by a `*.sh` glob for its whole existence.
+	# `mapfile` is bash 4.0+; macOS ships 3.2, where it silently does nothing and the check
+	# stops testing anything. Use a plain loop.
+	( cd scripts
+	  targets=""
+	  for f in *; do
+	    [ -f "$f" ] || continue
+	    head -1 "$f" | grep -q '^#!/.*bash' && targets="$targets $f"
+	  done
+	  # shellcheck disable=SC2086
+	  shellcheck -x -s bash $targets && echo "clean:$targets" )
 else
 	echo "shellcheck not installed — skipping (binary: github.com/koalaman/shellcheck/releases)"
 fi
