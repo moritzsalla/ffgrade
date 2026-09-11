@@ -1,0 +1,17 @@
+# Camera originals. 23GB, and git is the wrong tool for them — they are irreplaceable but they
+# never change, so they need a BACKUP, not version history. Keep them off the index deliberately.
+src/
+
+# Everything a render wrote. Reconstructible from src/ + scripts/, and measured in gigabytes.
+dist/
+
+# Generated LUTs from the search that found the shipped one. The parameters that produce them are
+# recorded in scripts/02-grade.sh's header, so the files themselves are reproducible output.
+luts/tone/variants/
+luts/filmic/*.cube
+
+# Apple's LUT archive — redistributable only via Apple's own download (see luts/apple/SOURCE.txt).
+luts/apple/*.zip
+
+.DS_Store
+*.partial
