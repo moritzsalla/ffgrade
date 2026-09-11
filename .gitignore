@@ -1,9 +1,18 @@
 # Camera originals. 23GB, and git is the wrong tool for them — they are irreplaceable but they
 # never change, so they need a BACKUP, not version history. Keep them off the index deliberately.
-src/
+#
+# NOTE THE PATTERN: `src/*` and not `src/`. Git cannot re-include anything beneath an excluded
+# DIRECTORY, so `src/` would also swallow the .gitkeep markers that exist to make these folders
+# survive a clone — the pipeline writes into them and would otherwise fail on a fresh checkout.
+# Exclude the contents, keep the directory, re-admit the marker.
+src/*
+!src/.gitkeep
 
 # Everything a render wrote. Reconstructible from src/ + scripts/, and measured in gigabytes.
-dist/
+dist/*
+!dist/*/
+dist/*/*
+!dist/*/.gitkeep
 
 # Generated LUTs from the search that found the shipped one. The parameters that produce them are
 # recorded in scripts/02-grade.sh's header, so the files themselves are reproducible output.
