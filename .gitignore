@@ -62,3 +62,13 @@ __pycache__/
 # Working notes: specs and tickets for work in progress. The substance belongs in a commit message,
 # docs/BACKLOG.md or an ADR by the time the work lands, so this is deliberately disposable.
 .scratch/
+
+# Agent worktrees. `git worktree add` under the repo root puts a second full checkout INSIDE the
+# working tree, so it shows up as 22MB of untracked files and would be committed by a careless
+# `git add -A`. Ignoring the path does not affect the worktree itself — git tracks that in
+# .git/worktrees — so `git worktree list` still finds it and its branch is unaffected.
+#
+# Deliberately NOT a blanket `.claude/`: project-scoped agent config (settings.json, commands,
+# skills) belongs in version control if it is ever added, and a broad rule here would silently
+# swallow it.
+.claude/worktrees/
