@@ -16,7 +16,7 @@
 #
 # WHAT IS STILL AUTOMATIC vs WHAT THIS REFUSES TO GUESS:
 #   automatic  rotation class, exposure match, stabilisation, the whole grade, tag verification
-#   refuses    landscape clips (they need a framing decision), the Feed crop offset (composition)
+#   refuses    only genuinely unexpected rotations; the Feed crop offset stays a per-clip call
 #
 # EXPOSURE MATCHING is the part that makes "one recipe" actually mean "one look". The grade was
 # tuned on a single frame of IMG_0609, ~20 minutes before sunset. Golden hour moves fast; clips
@@ -69,16 +69,22 @@ for SRC in "${CLIPS[@]}"; do
 	CLIP="$(basename "${SRC%.*}")"
 
 	# --- rotation class. The matrix predicts it; no eyeballing needed. -------------------
-	# `|| true` is load-bearing: grep exits 1 when a landscape clip has NO rotation matrix, and
-	# under `set -e` that aborts the whole run on the first such clip, silently, with exit 1 and
-	# no message. 11 of this shoot's 19 clips are landscape, so it fails on clip one.
+	# `|| true` is load-bearing: grep exits 1 when a clip has NO rotation matrix, and under
+	# `set -e` that aborts the whole run on the first such clip, silently, with exit 1 and no
+	# message. Most of this shoot has no matrix, so it fails on clip one.
+	#
+	# A MISSING matrix does not mean landscape footage. It means portrait content stored as
+	# 3840x2160 with the flag absent — ffmpeg has nothing to autorotate by, so the frame stays
+	# sideways, and a sideways portrait frame reads as a landscape composition. These clips were
+	# skipped as "needing a framing decision" for a while; they need transpose=1 and nothing else.
+	# Confirmed by rendering five of them. See docs/BATCH_RUNBOOK.md, "Mixed orientation".
 	ROT=$(ffprobe -v error -select_streams v:0 -show_entries stream_side_data=rotation \
 		-of csv=p=0 "$SRC" 2>/dev/null | grep -v '^[[:space:]]*$' | head -1 || true)
 	case "${ROT:-none}" in
-		90)  FIX=",vflip,hflip" ;;   # +90: autorotate lands it upside down. Only IMG_0609 so far.
-		-90) FIX="" ;;               # -90: autorotate alone is correct.
-		*)   say "SKIP  $CLIP — landscape (no rotation matrix). Needs a framing decision; see BATCH_RUNBOOK."
-		     SKIPPED=$((SKIPPED+1)); continue ;;
+		90)   FIX=",vflip,hflip" ;;   # +90: autorotate lands it upside down
+		-90)  FIX="" ;;               # -90: autorotate alone is correct
+		none) FIX=",transpose=1" ;;   # no matrix: portrait stored as landscape
+		*)    say "SKIP  $CLIP — unexpected rotation '$ROT'"; SKIPPED=$((SKIPPED+1)); continue ;;
 	esac
 
 	# --- exposure match: one cheap probe, not a full pass --------------------------------

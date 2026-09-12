@@ -124,9 +124,10 @@ require_portrait() {
 	fi
 }
 
-# Where the MEDIA lives. The repo holds code, docs and LUTs (~34MB, fine to sync and push); src/
-# and dist/ hold ~29GB of camera originals and renders, which must not sit in an iCloud-synced
-# folder or anywhere near a git remote.
+# Where the MEDIA lives. The repo holds code, docs and LUTs (~22MB tracked); src/ and dist/ hold
+# tens of gigabytes of camera originals and renders. Keeping them apart means `git status` is not
+# stat-ing 29GB on every call, and the repo can be cloned anywhere without dragging footage along.
+# Nothing enforces the split — .gitignore already stops media being committed either way.
 #
 # Resolution order: $GRADE_WORK_DIR, then a `.workdir` file at the repo root (gitignored, one
 # path, no quotes), then the repo itself — so a self-contained checkout with src/ and dist/ inside
