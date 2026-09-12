@@ -51,7 +51,7 @@ luts/apple/*.zip
 luts/apple/*.cube
 luts/apple/*.zip
 
-# Backup copies of generated LUTs — regenerate from the parameters in scripts/02-grade.sh.
+# Backup copies of generated LUTs — regenerate from the parameters in look.json.
 *.cube.prev
 .workdir
 

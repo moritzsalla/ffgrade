@@ -128,10 +128,11 @@ def main():
         v = max(0.0, min(1.0, v))
         lines.append(f"{v:.8f} {v:.8f} {v:.8f}")
 
-    # Write then rename, never write in place. ensure_tone_lut decides freshness from the .cube's
-    # mtime against look.json's, so a truncated file from an interrupted or short write would be
-    # considered fresh forever and silently grade every clip through a partial curve. Same failure
-    # class 00-stabilise-detect.sh guards with its .partial file, one layer down.
+    # Write then rename, never write in place. is_current() above reads only the TITLE line, so a
+    # file truncated by an interrupted or short write keeps a valid-looking fingerprint and is
+    # treated as current forever — silently grading every clip through a partial curve. Staging
+    # makes a half-written cube impossible to observe. Same failure class 00-stabilise-detect.sh
+    # guards with its .partial file, one layer down.
     partial = a.out + ".partial"
     try:
         with open(partial, "w") as fh:

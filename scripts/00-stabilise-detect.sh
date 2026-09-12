@@ -24,7 +24,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
-CLIP="$1"
+# `${1:-}`, not `$1`: under `set -u` a bare $1 makes a no-argument run die with
+# "$1: unbound variable" and a line number instead of saying what it wanted. The bats test named
+# for this asserts that exact string is absent, but only ever calls the scripts WITH an argument,
+# so it could not see it. grade.sh was the only entry point that got this right.
+CLIP="${1:-}"
+[ -n "$CLIP" ] || { echo "usage: ./00-stabilise-detect.sh IMG_XXXX" >&2; exit 1; }
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
 IN="$WORK/dist/02-graded/${CLIP}_graded.mov"
@@ -54,4 +59,4 @@ mv "$TMP" "$OUT"
 trap - EXIT
 echo "done: $OUT"
 echo "the final stages will now pick this up automatically; override smoothing with e.g.:"
-echo "  SMOOTHING=45 ./03-final-reels.sh ${CLIP}"
+echo "  SMOOTHING=45 ./03-final.sh ${CLIP} reels"

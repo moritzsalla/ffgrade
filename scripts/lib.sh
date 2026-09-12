@@ -130,13 +130,14 @@ check_disk_space() {
 # One source for every look value: look.json at the repo root. Nothing else may hardcode one.
 # Before this existed, `SAT=1.27` was written out in two scripts and had already started to drift
 # in the obvious way — two copies, one edited.
-look() {  # look <jq-path> [fallback]
-	local key="$1" fallback="${2:-}" v
+# NO FALLBACK, on purpose. The parameter that used to be here had no caller and could not get one:
+# substituting a default for a missing key is how a run silently renders a different look, which is
+# the failure this whole file exists to end. A missing key stops the run. That makes the key set a
+# contract between the scripts and look.json, which is worth more than a graceful degrade.
+look() {  # look <jq-path>
+	local key="$1" v
 	v=$(jq -r "$key // empty" "$LOOK_FILE" 2>/dev/null) || v=""
-	if [ -z "$v" ]; then
-		[ -n "$fallback" ] || { echo "look.json: missing $key and no fallback" >&2; return 1; }
-		v="$fallback"
-	fi
+	[ -n "$v" ] || { echo "look.json: missing $key" >&2; return 1; }
 	printf '%s\n' "$v"
 }
 
@@ -235,7 +236,12 @@ require_nonempty() {
 # A stabilisation transform is measured against the DECODED frame, so re-orienting a source
 # invalidates it: the .trf then describes motion in a frame that no longer exists, and the warp
 # fights footage it was never measured on. Nothing announces that — the render just comes out
-# subtly wrong. Same freshness rule ensure_tone_lut applies to shipped.cube against look.json.
+# subtly wrong.
+#
+# This is the one freshness check in the pipeline that is still mtime-based, and deliberately so:
+# a .trf has no content fingerprint to compare, and "was it measured after the footage" is exactly
+# what an mtime answers. shipped.cube went the other way for a reason that does not apply here —
+# git does not preserve mtimes, so a COMMITTED artefact cannot use them. A .trf is never committed.
 #
 # The reference is always the SOURCE CLIP, never an intermediate. Transforms are motion-only and
 # survive a re-grade, so a re-rendered master says nothing about whether the camera moved — and
@@ -375,7 +381,17 @@ render_delivery() {  # render_delivery <final-out> <label> <ffmpeg-arg>...
 		echo "  $out left exactly as it was" >&2
 		return 1
 	fi
-	# Tag before installing, so the file that lands is the one that was verified.
-	safe_retag "$tmp" -movflags +faststart >/dev/null
+	# Tag before installing, so the file that lands is the one that was verified — and CHECK the
+	# result, like the two guards above. A bare call here fails open: it only aborted because the
+	# callers run under `set -e`, so any context that suppresses it (bats `run`, an
+	# `if render_delivery ...`) installed an untagged file and returned 0. Verified by stubbing
+	# safe_retag to fail: the installed file measured unknown,unknown,unknown. That is the
+	# double-transform this file's header exists to prevent, arriving through the function written
+	# to prevent it.
+	if ! safe_retag "$tmp" -movflags +faststart >/dev/null; then
+		rm -f "$tmp"
+		echo "$label FAILED (could not tag) — $out left exactly as it was" >&2
+		return 1
+	fi
 	mv "$tmp" "$out"
 }

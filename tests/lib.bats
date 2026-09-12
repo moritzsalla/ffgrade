@@ -374,12 +374,26 @@ fail() {
 # A suite that cannot detect "the program does not start" is not a suite.
 
 @test "lib.sh defines every function the stage scripts call" {
+	# DERIVED, NOT LISTED. This used to hardcode ten names and was not updated when the delivery
+	# chain moved into lib.sh, so it silently stopped covering source_fps, stab_prefix,
+	# grain_plate, delivery_image_chain, delivery_grain_branch and render_delivery — six of the
+	# sixteen, including the one that protects approved deliverables. A test named for "every
+	# function" that checks a fixed subset is the coverage-shaped hole CLAUDE.md rules out, so the
+	# list now comes from the scripts themselves and cannot go stale again.
+	local fn missing=""
 	source "$BATS_TEST_DIRNAME/../scripts/lib.sh"
-	for fn in probe_tags verify_bt709 safe_retag check_disk_space require_nonempty \
-	          require_portrait resolve_work_dir look ensure_tone_lut transform_is_fresh; do
-		run type -t "$fn"
-		[ "$output" = "function" ] || { echo "MISSING: $fn"; false; }
+	for fn in $(grep -hoE '^[a-z_]+\(\)' "$BATS_TEST_DIRNAME/../scripts/lib.sh" | tr -d '()'); do
+		[ "$(type -t "$fn")" = "function" ] || missing="$missing $fn"
 	done
+	[ -z "$missing" ] || fail "lib.sh declares but does not define:$missing"
+
+	# And every helper a stage script calls must actually exist in lib.sh — the direction that
+	# catches a rename on one side only.
+	for fn in $(grep -hoE '\b(probe_tags|verify_bt709|safe_retag|check_disk_space|require_nonempty|require_portrait|resolve_work_dir|look|ensure_tone_lut|transform_is_fresh|source_fps|stab_prefix|grain_plate|delivery_image_chain|delivery_grain_branch|render_delivery)\b' \
+	         "$BATS_TEST_DIRNAME"/../scripts/0*.sh "$BATS_TEST_DIRNAME"/../scripts/grade.sh | sort -u); do
+		[ "$(type -t "$fn")" = "function" ] || missing="$missing $fn"
+	done
+	[ -z "$missing" ] || fail "stage scripts call functions lib.sh does not define:$missing"
 }
 
 @test "every stage script starts and reports usage rather than dying" {
@@ -392,12 +406,28 @@ fail() {
 	done
 }
 
+@test "every stage script reports usage when given NO arguments" {
+	# The test above asserts "unbound variable" never appears, which is exactly what a bare `$1`
+	# under `set -u` produces — but it always passed an argument, so it could not see it. All four
+	# stage scripts died with "line NN: $1: unbound variable"; only grade.sh printed a usage line.
+	for s in 01-baseline 02-grade 03-final 00-stabilise-detect grade; do
+		run "$BATS_TEST_DIRNAME/../scripts/$s.sh"
+		[ "$status" -ne 0 ] || fail "$s.sh exited 0 with no arguments"
+		[[ "$output" != *"unbound variable"* ]] || fail "$s.sh died on \$1 instead of saying usage: $output"
+		[[ "$output" == *"usage:"* ]] || fail "$s.sh gave no usage line: $output"
+	done
+}
+
 @test "grade.sh plans a real clip end to end (dry run)" {
 	local work src
 	work=$(resolve_work_dir "$BATS_TEST_DIRNAME/.." 2>/dev/null) || work="$BATS_TEST_DIRNAME/.."
 	src=$(ls "$work"/src/*.mov 2>/dev/null | head -1)
 	[ -n "$src" ] || skip "no source footage"
-	DRY=1 run "$BATS_TEST_DIRNAME/../scripts/grade.sh" "$src"
+	# Real footage in, but the OUTPUT goes to a temp dir. Without GRADE_WORK_DIR this ran against
+	# the repo root, so every check.sh run left a dist/reports/run-*.txt and a per-clip tone cube
+	# in the tree someone actually delivers from — 38 report files had accumulated.
+	mkdir -p "$BATS_TEST_TMPDIR/dryrun"
+	GRADE_WORK_DIR="$BATS_TEST_TMPDIR/dryrun" DRY=1 run "$BATS_TEST_DIRNAME/../scripts/grade.sh" "$src"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"clip(s)"* ]] || fail "[[ \"$output\" == *\"clip(s)\"* ]]"
 	[[ "$output" != *"command not found"* ]] || fail "[[ \"$output\" != *\"command not found\"* ]]"
@@ -794,4 +824,90 @@ JSON
 	offenders=$(grep -n 'ffmpeg .*-y.*"\$\(OUT\|out\)"' "$BATS_TEST_DIRNAME"/../scripts/*.sh \
 		| grep -v ':[0-9]*:[[:space:]]*#' || true)
 	[ -z "$offenders" ] || fail "renders straight to the delivery path:$offenders"
+}
+
+# --- output integrity: the deliverable that already exists ---------------------
+# `ffmpeg -y` pointed at a delivery path truncates it before the graph is known to initialise, so a
+# failed re-render destroys an approved file. render_delivery stages, checks and tags before
+# installing. These pin BOTH halves of that: the staging behaviour, and the tag check that decides
+# whether a staged file is allowed to land.
+
+@test "a failed re-render through 03-final.sh leaves the approved deliverable byte-identical" {
+	# grade.sh was converted to render_delivery and 03-final.sh was not, so the staged path still
+	# truncated the file the one-pass path protected — same directory, same filename. Measured: an
+	# approved 2176-byte mp4 left at 0 bytes.
+	#
+	# No special trigger needed. The synthetic fixture cannot survive the delivery chain (zscale
+	# reports "code 3074: no path between colorspaces" on it, while a real graded master passes the
+	# identical graph), so a plain run is a reliable failing render.
+	local work="$BATS_TEST_TMPDIR/keepdeliv" out before
+	mkdir -p "$work/src" "$work/dist/02-graded" "$work/dist/03-final"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
+
+	out="$work/dist/03-final/CLIP_reels-stories_9x16.mp4"
+	ffmpeg -y -f lavfi -i "color=c=red:s=64x128:d=0.1:r=24" -frames:v 1 \
+		-c:v libx264 -pix_fmt yuv420p "$out" -v error
+	before=$(md5 -q "$out")
+
+	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
+	[ "$status" -ne 0 ] || skip "the fixture rendered successfully; this test needs a failing render"
+	[ -s "$out" ] || fail "the approved deliverable was truncated"
+	[ "$(md5 -q "$out")" = "$before" ] || fail "the approved deliverable was modified"
+	[ ! -f "$work/dist/03-final/CLIP_reels-stories_9x16.partial.mp4" ] \
+		|| fail "left a staging file in the folder someone uploads from"
+}
+
+@test "render_delivery refuses to install a file it could not tag" {
+	# The ffmpeg result and the emptiness check were both guarded with `if !`; the retag was a bare
+	# call. That fails open wherever `set -e` is suppressed — including this `run` — and installed a
+	# file measuring unknown,unknown,unknown, returning 0. A wrongly tagged file is the
+	# double-transform lib.sh exists to prevent.
+	local out="$BATS_TEST_TMPDIR/untaggable.mp4"
+	safe_retag() { return 1; }     # the remux fails, however it fails
+	run render_delivery "$out" "encode" \
+		-y -f lavfi -i "color=c=gray:s=64x128:d=0.1:r=24" \
+		-filter_complex "[0:v]${DELIVERY_SETPARAMS}[o]" -map "[o]" -frames:v 1 \
+		-c:v libx264 -pix_fmt yuv420p
+	[ "$status" -ne 0 ] || fail "installed a file it could not tag, and reported success"
+	[ ! -e "$out" ] || fail "installed an untagged file at $out"
+	[ ! -e "$BATS_TEST_TMPDIR/untaggable.partial.mp4" ] || fail "left a staging file behind"
+}
+
+@test "a clip whose render fails does not take the rest of the batch with it" {
+	# Measured: a two-clip run whose first render failed never attempted the second, printed no
+	# summary line, and left the report ending mid-file. grade.sh already skips a non-portrait clip
+	# and continues; a render failure went straight through `set -e` instead. In a 19-clip
+	# unattended run a failure at clip 3 silently costs the other 16.
+	#
+	# The trigger is the documented one: a TRUNCATED .trf stamped newer than its source, so it
+	# passes the freshness check, is not re-detected, and then dies deep in the filter graph with
+	# "Cannot parse localmotion: unexpected end of file". Only AAA gets one, so BBB is the clip
+	# that must still render.
+	local work="$BATS_TEST_TMPDIR/batch"
+	mkdir -p "$work/src" "$work/dist/stab"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/AAA.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/BBB.mov"
+	printf 'VID.STAB 1\n\n' > "$work/dist/stab/AAA.trf"
+	# bash 3.2's -nt compares whole seconds and these are created inside one, so stamp the order.
+	touch -t 202609010000 "$work/src/AAA.mov" "$work/src/BBB.mov"
+	touch -t 202609020000 "$work/dist/stab/AAA.trf"
+
+	GRADE_WORK_DIR="$work" MATCH=0 run "$SCRIPTS/grade.sh" "$work/src"
+	[[ "$output" == *"FAIL  AAA"* ]] || fail "the failing clip was not reported as failed: $output"
+	[ -s "$work/dist/03-final/BBB_reels-stories_9x16.mp4" ] \
+		|| fail "the batch stopped at the failing clip; BBB was never rendered: $output"
+	[[ "$output" == *"1 failed"* ]] || fail "the summary did not count the failure: $output"
+	[ "$status" -ne 0 ] || fail "a run with a failed clip exited 0"
+}
+
+@test "a usage error creates nothing in the output tree" {
+	# grade.sh made its output directories and an empty run-*.txt BEFORE checking that it had any
+	# clips, so `./grade.sh` with no arguments left litter in the folder someone delivers from —
+	# and one stray report per suite run, since the no-argument test above calls exactly that.
+	local work="$BATS_TEST_TMPDIR/usage"
+	mkdir -p "$work"
+	GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh"
+	[ "$status" -ne 0 ] || fail "no-argument run exited 0"
+	[ ! -d "$work/dist" ] || fail "a usage error created $(find "$work/dist" -type f | tr '\n' ' ')"
 }

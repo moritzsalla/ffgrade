@@ -20,7 +20,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
-CLIP="$1"
+# `${1:-}` so a no-argument run says what it wanted — see 00-stabilise-detect.sh.
+CLIP="${1:-}"
+[ -n "$CLIP" ] || { echo "usage: ./03-final.sh IMG_XXXX [reels|feed] [CROP_Y]" >&2; exit 1; }
 TARGET="${2:-reels}"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
