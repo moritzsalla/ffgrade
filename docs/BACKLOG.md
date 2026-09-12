@@ -7,9 +7,9 @@ Everything raised and not finished. Ordered by what blocks what, not by size.
 **Sign off the v4 look.** The current proof carries four changes on top of the approved grade:
 black point lifted 0.015 → 0.025 with gamma eased 2.09 → 2.02 (shadow detail), stabilisation,
 chroma-only denoise for the sign shimmer, and clustered grain moved after the sharpener. Until
-that is judged, the other 18 clips should not be rendered against it.
+that is judged, the rest of the shoot should not be rendered against it.
 
-**Run the remaining 18 clips.** Per-clip procedure in `docs/BATCH_RUNBOOK.md`. One thing there is
+**Run the remaining clips.** Per-clip procedure in `docs/BATCH_RUNBOOK.md`. One thing there is
 per-clip and must not be inherited from IMG_0609: the Feed crop offset, since 750 is this clip's
 composition only.
 

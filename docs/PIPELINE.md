@@ -52,9 +52,9 @@ Purely technical, zero creative judgment:
   that was wrong. Measure the actual pixels before correcting anything — a small preview can lie.)
   Capture used **locked** WB and focus (confirmed) — so unlike auto WB, this should
   hold consistent across every clip in the shoot rather than drifting per-scene. IMG_0609's
-  near-neutral reading is therefore a reasonable baseline expectation for the other 17 clips too,
+  near-neutral reading is therefore a reasonable baseline expectation for the rest of the shoot too,
   though still worth a spot-check on one or two (a locked value can still read differently under
-  a lighting change the lock doesn't compensate for) rather than trusting it blind on all 18.
+  a lighting change the lock doesn't compensate for) rather than trusting it blind on all of them.
 - **No sharpening, no noise reduction, no saturation push at this stage.** Log footage *looks*
   soft because the log curve compresses contrast, not because the sensor capture is soft — once
   the CST restores contrast, apparent sharpness returns on its own. Sharpening before the
@@ -154,12 +154,18 @@ expense of another.
 - **Downscale 2160×3840 → 1080×1920** with **Lanczos** — sharpest of the common resampling
   algorithms, matters because this is the one lossy resize in the whole pipeline.
 - **Grain AFTER downscale, not before.** Grain sized for a 4K frame gets crushed/invisible once
-  scaled to 1080p — doing it in source order silently wastes the step. Luma-only noise
-  (temporal+uniform) — chroma noise reads as color speckle, not film grain.
+  scaled to 1080p — doing it in source order silently wastes the step. Luma-only: chroma noise
+  reads as colour speckle, not film grain.
+
+  Superseded since this was written. The per-pixel noise described here does not survive
+  delivery — the compressor smears it into blobs — and it must also come after the sharpener,
+  which rings it. What ships is a half-resolution grey plate blended in, which keeps its structure
+  through the re-encode and costs ~22% less bitrate. The measurements are in `scripts/lib.sh`
+  above `grain_plate`, which is where the filter is now built.
 - **Sharpen AFTER downscale** — mild, corrective (compensating for the softening the resize
   itself causes), not a stylistic push. Luma only.
 - **Encode**: H.264 High Profile, yuv420p (dithered down from the master's 10-bit, not
-  truncated), CRF ~16, AAC 192k, `+faststart`. Instagram recompresses everything it receives
+  truncated), CRF 18, AAC 192k, `+faststart`. Instagram recompresses everything it receives
   regardless — feeding it high quality just means less of what it does have to throw away.
   Same color-tag verification as every other stage.
 
@@ -551,15 +557,15 @@ through each): R−B 3.5 vs 3.2. No meaningful difference. Not the cause.
 
 ## Disk space policy
 
-Measured: one clip's baseline + graded ProRes stages together = 4.6GB. Across 18 clips that's
-~83GB — more than the 63GB free on this machine (checked via `df`), before the 24GB `src/`
-footage already on disk. Keeping all 18 clips' ProRes masters simultaneously does not fit.
+Measured: one clip's baseline + graded ProRes stages together = 4.6GB. Across a shoot this size
+that's ~87GB — more than the 63GB free on this machine (checked via `df`), before the 24GB `src/`
+footage already on disk. Keeping the whole shoot's ProRes masters simultaneously does not fit.
 
 **Policy**: a clip's `01-baseline` and `02-graded` ProRes files are kept on disk only while that
 clip is actively being worked on (review, proofs, sign-off). Once a clip is approved and work
 moves to the next one, its ProRes intermediates are deleted — `03-final` delivery MP4s (small,
 ~100-170MB each) are the only thing kept long-term per clip, alongside the untouched `src/`
-original. At most one clip's ProRes masters exist on disk at a time, not all 18.
+original. At most one clip's ProRes masters exist on disk at a time.
 
 Deliberately NOT "delete immediately after each export": a graded master takes ~10-15 minutes to
 regenerate, so deleting it the moment finals are exported would turn any later "nudge the curve
@@ -574,4 +580,4 @@ baseline + graded from `src/` via the stage scripts first — cheap in disk, cos
 
 - Grain and sharpen strength are a first pass, not tuned by eye yet.
 - Only IMG_0609 has been run through the full pipeline — everything above needs to survive
-  contact with the other 17 clips before being called "the recipe."
+  contact with the rest of the shoot before being called "the recipe."

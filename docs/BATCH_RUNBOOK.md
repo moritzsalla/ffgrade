@@ -89,4 +89,4 @@ only copy.
 
 Safe to loop unattended: the mechanical stages, given a proof that has been signed off. What is
 never safe to batch is the Feed crop, because its offset is a composition call per clip; step 5
-above says what `grade.sh` does about that. This pipeline is "scripted mechanics, per-clip human gate," not "point at 18 files and walk away."
+above says what `grade.sh` does about that. This pipeline is "scripted mechanics, per-clip human gate," not "point at the folder and walk away."
