@@ -24,12 +24,20 @@ Getting that out of it is a tone problem, and tone is something ffmpeg can do pr
 ./scripts/grade.sh src/                  # whole folder → dist/03-final/
 ./scripts/grade.sh src/IMG_0609.mov      # one clip
 
-FEED=1 ./scripts/grade.sh src/           # also emit the 4:5 Feed crop
+PROOF=2 ./scripts/grade.sh src/IMG_0609.mov   # 2s through the real chain → dist/proofs/
 STAB=0 ./scripts/grade.sh src/           # skip stabilisation, faster
 DRY=1  ./scripts/grade.sh src/           # plan only, render nothing
+
+FEED=1 CROP_Y=750 ./scripts/grade.sh src/IMG_0609.mov   # also emit the 4:5 Feed crop
 ```
 
 Roughly 3 minutes per clip. Output lands in `dist/03-final/`, a per-run report in `dist/reports/`.
+
+`PROOF` is the one to reach for first: it renders a couple of seconds through the identical filter
+chain, so a look can be judged in seconds instead of minutes. The Feed crop needs `CROP_Y` because
+its offset is a composition call per clip, and a run across several clips is refused without one
+rather than quietly applying one clip's framing to all of them. The full list of knobs is in
+`scripts/grade.sh`'s header.
 
 ## Before touching anything
 
@@ -49,9 +57,17 @@ The Bench is a browser tool for setting the look by eye. Export a frame, drop it
 and the image updates instantly — no render round-trip. The calibration readouts sit beside the
 sliders so you can see when a change pushes a known colour off its spec.
 
-When it looks right, hit **Send grade** and the settings come back as `look.json`, which is the
-single source every stage reads. Change that file and the tone LUT regenerates itself on the next
-run, so the `.cube` can never disagree with the numbers describing it.
+**Paste the current `look.json` into the Bench's load panel before you start.** The sliders then
+open on the shipped look rather than generic defaults, and the blocks the Bench does not edit
+(`grain`, `stabilisation`, `match`) are carried through into its output. Skip it and the emitted
+file is incomplete, which stops every stage on the first missing key — `look()` has no fallbacks,
+deliberately, because a silent substitution would be a different look.
+
+When it looks right, hit **Send grade** and the settings come back as `look.json`, the single
+source every stage reads. Change that file and the tone LUT regenerates itself on the next run:
+each generated `.cube` carries its own parameters in its `TITLE`, and a mismatch means rebuild. It
+is checked by content rather than by timestamp, because git does not preserve timestamps and a
+fresh clone would otherwise trust a stale cube forever.
 
 The Bench's curve maths is a port of the renderer's. `tests/curve-parity.py` runs both over the
 same inputs and fails if they diverge — otherwise the preview could quietly stop predicting the
@@ -94,9 +110,14 @@ One ffmpeg invocation per clip, source to deliverable. In order:
 Exposure is matched per clip against a reference before the tone curve, so a shoot grades
 consistently without hand-tuning each file.
 
-The staged scripts (`01-baseline` → `02-grade` → `03-final-*`) do the same work in separate passes,
+The staged scripts (`01-baseline` → `02-grade` → `03-final`) do the same work in separate passes,
 writing ProRes intermediates. They exist for re-tuning a look without redoing the conversion. Since
 the look is settled, `grade.sh` skips them — measured 2.3× faster with no intermediates written.
+
+**One deliberate difference between the two paths:** `grade.sh` solves each clip's gamma against
+the exposure the look was tuned at, and the staged path applies `look.json`'s gamma raw. So the
+same clip renders slightly different tone through each, by design. `MATCH=0` turns the solve off
+and makes them agree.
 
 ## Layout
 
@@ -106,8 +127,8 @@ dist/           Everything generated. Gitignored.
   01-baseline/    staged pipeline only: after the Log→Rec.709 conversion
   02-graded/      staged pipeline only: the ProRes master
   03-final/       deliverables
-  proofs/         cheap fast renders for judging a look before committing to a full render
-  ladders/        side-by-side comparison stills
+  proofs/         short renders through the real chain, for judging before a full render (PROOF=)
+  ladders/        side-by-side comparison stills, assembled by hand
   stab/           camera-motion transforms, per clip
   reports/        what each run did
 scripts/        The pipeline. Start at lib.sh.
@@ -118,6 +139,10 @@ luts/
   tone/           shipped.cube, generated from look.json
 look.json       The look. One source, every stage reads it.
 docs/           PIPELINE.md is the real documentation.
+  BATCH_RUNBOOK.md  per-clip procedure, and which calls are not safe to automate
+  SHOOTING_SETUP.md how to shoot for this pipeline — prescriptive, read before a shoot
+  SHOOTING_RETRO.md what this shoot got wrong — retrospective, read before the next one
+  adr/            decisions that would be expensive to reverse, with the measurements
 tests/          bats suite + the curve parity check.
 CONTEXT.md      What each word means here.
 ```
@@ -133,10 +158,16 @@ Run everything with `./scripts/check.sh`:
 - **`tests/curve-parity.py`** — the important one. Runs the Bench's JavaScript and the Python
   generator over the same inputs and fails if they disagree by more than one 8-bit code value. If
   these drift, the browser preview stops predicting the render and nothing else would catch it.
-- **`tests/lib.bats`** — 20 tests. Most cover the safety layer: colour-tag verification, the
-  portrait guard, disk-space checks, and that a failed remux never destroys the file it was fixing.
-  Three are smoke tests that just check the scripts start and run, which sounds trivial until the
-  whole suite passes green while four functions are missing and nothing can execute. That happened.
+- **`tests/lib.bats`** — the bats suite. Most of it covers the safety layer: colour-tag
+  verification, the portrait guard, disk-space checks, work-dir resolution, transform freshness,
+  and that neither a failed remux nor a failed re-render destroys the file it was replacing. A few
+  are smoke tests that just check the scripts start and run, which sounds trivial until the whole
+  suite passes green while four functions are missing and nothing can execute. That happened.
+  One test renders a fraction of a second of real footage through the production filter graph,
+  because nothing else in the suite executes it and shellcheck cannot see inside a filter string.
+
+  The count is deliberately not written down here. `check.sh` prints it, and a number in prose goes
+  stale by construction — this line said 20 while the suite said 42.
 
 Every test exists because the thing it covers already broke, and two of the guards shipped broken
 and went unnoticed until something exercised them. The suite has been mutation-tested — each guard

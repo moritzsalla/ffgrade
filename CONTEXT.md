@@ -17,8 +17,8 @@ The untouched camera recording as it came off the phone. Read-only for the life 
 _Avoid_: original, raw, footage, master
 
 **Baseline**:
-A clip after the CST, the rotation fix and the colour tags, and nothing else — technically
-correct, with no creative decision in it.
+A clip after the CST and the colour tags, and nothing else — technically correct, with no creative
+decision in it. No rotation: orientation is an ingest concern (ADR 0005).
 _Avoid_: CST output, post-CST file, neutral, the flat pass
 
 **Master**:
@@ -142,7 +142,7 @@ _Avoid_: grader — in this trade a grader is a person; also workbench, the tool
 One sitting at the Bench over one clip's frames, ending in a grade sent back.
 _Avoid_: round trip, review
 
-**Rotation class**:
-Which of the three display-matrix values a clip carries (none, −90, +90). Clips behave by class,
-not individually.
-_Avoid_: orientation — a clip's orientation is what it presents as, the class is what causes it
+**Rotation class**: _retired._
+Meant which of the three display-matrix values a clip carried (none, −90, +90). The pipeline no
+longer reasons about display matrices at all — it decodes a frame and measures it — so the term
+has no code behind it. See ADR 0005. Kept here only so the phrase is recognisable in old notes.

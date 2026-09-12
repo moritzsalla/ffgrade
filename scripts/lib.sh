@@ -20,15 +20,27 @@ set -euo pipefail
 # Resolved relative to lib.sh itself, so every stage sees the same file regardless of cwd.
 LOOK_FILE="${LOOK_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/look.json}"
 
-# ffprobe reports the video stream TWICE on these files (once inside [STREAM_GROUP], once as a
-# top-level [STREAM]) plus a blank separator line — so this reads the first non-empty line rather
-# than comparing the whole multi-line output against one expected value. An earlier version of
-# this function compared the raw output directly and therefore false-failed on every correctly
-# tagged file.
+# ffprobe misreports these files two ways at once, and this function exists to survive both.
+#
+#   1. The video stream prints TWICE (once inside [STREAM_GROUP], once as a top-level [STREAM])
+#      plus a blank separator line. An early version compared the whole multi-line output against
+#      one expected value and so false-failed on every correctly tagged file.
+#   2. csv output carries a TRAILING COMMA on camera-structured files — "bt709,bt709,bt709," — so
+#      taking the first non-empty csv line still could never equal "bt709,bt709,bt709". Measured
+#      on a `-c copy` excerpt of a camera original: correctly tagged, still rejected. The repo's
+#      own rule covers this ("query fields individually, validate with a regex"); this function
+#      was the place still breaking it.
+#
+# So: one query per field, bare values, first non-empty line each, joined here. Nothing downstream
+# has to know which ffprobe quirk it is being protected from.
 probe_tags() {
-	ffprobe -v error -select_streams v:0 \
-		-show_entries stream=color_space,color_transfer,color_primaries \
-		-of csv=p=0 "$1" | grep -v '^[[:space:]]*$' | head -1
+	local file="$1" field value out=""
+	for field in color_space color_transfer color_primaries; do
+		value=$(ffprobe -v error -select_streams v:0 -show_entries "stream=$field" \
+			-of default=nw=1:nk=1 "$file" 2>/dev/null | grep -v '^[[:space:]]*$' | head -1)
+		out="${out:+$out,}${value:-unknown}"
+	done
+	printf '%s\n' "$out"
 }
 
 verify_bt709() {
@@ -52,6 +64,17 @@ verify_bt709() {
 safe_retag() {
 	local file="$1"
 	shift
+
+	# VERIFY BEFORE REWRITING. This function exists because encoders don't reliably stamp the
+	# tags — but they don't reliably get them wrong either, and remuxing unconditionally meant a
+	# full read+write of two ~2.3GB ProRes masters per clip on the staged path, roughly 9GB of I/O
+	# to change nothing. The header above has always described verify-then-fix; this makes the code
+	# agree with it. Every caller that needs -movflags +faststart also passes it at encode time, so
+	# skipping the remux loses nothing.
+	if verify_bt709 "$file" 2>/dev/null; then
+		return 0
+	fi
+
 	local tmp="${file%.*}_tagged.${file##*.}"
 
 	# `0:a:0?` — the trailing ? makes the audio stream optional, so a silent clip doesn't fail here.
@@ -80,8 +103,22 @@ safe_retag() {
 check_disk_space() {
 	local dir="$1"
 	local need_gb="$2"
-	local avail_gb
-	avail_gb=$(($(df -k "$dir" | tail -1 | awk '{print $4}') / 1024 / 1024))
+	local probe="$dir" avail_kb avail_gb
+	# The stages call this BEFORE `mkdir -p`, so on a first run into a fresh work dir the path does
+	# not exist yet. df then fails, the arithmetic below gets an empty operand, and the stage dies
+	# with a bash syntax error instead of a disk verdict — the guard aborting the run it exists to
+	# protect. Walk up to the nearest existing ancestor: it sits on the same volume, and the volume
+	# is the only thing being measured.
+	while [ -n "$probe" ] && [ "$probe" != "/" ] && [ ! -d "$probe" ]; do
+		probe="$(dirname "$probe")"
+	done
+	avail_kb=$(df -k "$probe" 2>/dev/null | tail -1 | awk '{print $4}')
+	# Validate before the arithmetic rather than after: an empty or non-numeric answer here used to
+	# reach $(( )) and abort the script with a syntax error.
+	case "$avail_kb" in
+		''|*[!0-9]*) echo "could not measure free space for $dir" >&2; return 1;;
+	esac
+	avail_gb=$((avail_kb / 1024 / 1024))
 	if [ "$avail_gb" -lt "$need_gb" ]; then
 		echo "LOW DISK SPACE: ${avail_gb}GB available in $dir, wanted ${need_gb}GB+" >&2
 		return 1
@@ -89,18 +126,6 @@ check_disk_space() {
 	echo "disk OK: ${avail_gb}GB available in $dir"
 }
 
-# This shoot is MIXED ORIENTATION: of 19 clips, 11 have no rotation matrix (they stay landscape
-# 3840x2160), 7 are -90 and IMG_0609 alone is +90 (both of those present as 2160x3840 portrait).
-# A vertical delivery script handed a landscape master will happily scale 3840x2160 into
-# 1080x1920 — no error, no warning, just a badly squashed file that looks "done". That is the
-# dangerous failure in a batch run, so refuse it here instead.
-# There is deliberately NO rotation logic in this pipeline — orientation is an ingest concern and
-# the source is trusted. This guard exists for one thing only: a genuinely landscape clip reaching
-# a vertical deliverable gets silently squashed into 1080x1920, and silent is the problem.
-#
-# So it decodes one frame and measures it, rather than reasoning about display matrices. ffmpeg
-# autorotates on decode, so this reflects what a viewer sees, and it does not care whether the
-# source was corrected by re-encoding or by fixing the matrix in Preview.
 # --- the look -----------------------------------------------------------------
 # One source for every look value: look.json at the repo root. Nothing else may hardcode one.
 # Before this existed, `SAT=1.27` was written out in two scripts and had already started to drift
@@ -115,16 +140,21 @@ look() {  # look <jq-path> [fallback]
 	printf '%s\n' "$v"
 }
 
-# The shipped tone LUT is GENERATED from look.json's tone block. Regenerate whenever look.json is
-# newer, so the .cube can never silently disagree with the numbers that claim to describe it —
-# which is the same failure class as the Bench drifting from the renderer, one layer down.
+# The shipped tone LUT is GENERATED from look.json's tone block, so the .cube can never silently
+# disagree with the numbers that claim to describe it.
+#
+# FRESHNESS IS BY CONTENT, NOT MTIME. This used to skip regeneration when the cube was newer than
+# look.json. git does not preserve mtimes, so on every fresh clone the committed cube lands newer
+# and is trusted forever — verified: with look.json backdated and contrast changed to 0.5, the
+# stale curve stayed in place in silence, and the guarantee held only on the machine where the edit
+# happened. make-tone-lut.py now stamps its parameters into the cube's TITLE and skips the write
+# itself when they already match, so this calls it unconditionally. Generating the 4096-entry
+# table costs ~0.1s; there was never anything to save by guessing.
 ensure_tone_lut() {
 	# Two lines, not one: bash expands the whole command line BEFORE `local` performs its
 	# assignments, so `local a="$1" b="$a"` sees an unset $a — and under `set -u` that aborts.
 	local root="$1"
 	local cube="$root/luts/tone/shipped.cube"
-	if [ -f "$cube" ] && [ "$cube" -nt "$LOOK_FILE" ]; then return 0; fi
-	echo "look.json is newer than shipped.cube — regenerating the tone curve"
 	"$root/scripts/make-tone-lut.py" "$cube" \
 		--gamma    "$(look .tone.gamma)"    --pivot  "$(look .tone.pivot)" \
 		--contrast "$(look .tone.contrast)" --toe    "$(look .tone.toe)" \
@@ -148,23 +178,44 @@ resolve_work_dir() {
 	printf '%s\n' "$w"
 }
 
-# Reads one dimension field on its own. ffprobe appends a TRAILING COMMA on this camera's csv
-# output (`3840,2160,`), so splitting a combined string yields an empty height and any numeric
-# comparison fails open. Query fields individually and validate.
-video_dim() {  # video_dim <file> <width|height>
-	ffprobe -v error -select_streams v:0 -show_entries "stream=$2" \
-		-of default=nw=1:nk=1 "$1" 2>/dev/null | grep -E '^[0-9]+$' | head -1
-}
-
+# This shoot is MIXED ORIENTATION: of 19 clips, 11 have no rotation matrix (they stay landscape
+# 3840x2160), 7 are -90 and IMG_0609 alone is +90 (both of those present as 2160x3840 portrait).
+# A vertical delivery script handed a landscape master will happily scale 3840x2160 into
+# 1080x1920 — no error, no warning, just a badly squashed file that looks "done". That is the
+# dangerous failure in a batch run, so refuse it here instead.
+# There is deliberately NO rotation logic in this pipeline — orientation is an ingest concern and
+# the source is trusted. This guard exists for one thing only: a genuinely landscape clip reaching
+# a vertical deliverable gets silently squashed into 1080x1920, and silent is the problem.
+#
+# So it decodes one frame and measures it, rather than reasoning about display matrices. ffmpeg
+# autorotates on decode, so this reflects what a viewer sees, and it does not care whether the
+# source was corrected by re-encoding or by fixing the matrix in Preview.
 require_portrait() {
-	local file="$1" tmp w h
-	tmp="$(mktemp -t portrait).png"
+	local file="$1" stem tmp w h
+	# mktemp CREATES the file it names, and ".png" is appended to that name — so the file mktemp
+	# made is not the file that gets removed. Both have to go, or every call leaks one temp file
+	# and a 19-clip batch leaves 19 behind.
+	stem="$(mktemp -t portrait)"
+	tmp="$stem.png"
 	if ! ffmpeg -v error -y -i "$file" -frames:v 1 "$tmp" 2>/dev/null; then
-		rm -f "$tmp"; echo "could not decode a frame from $file" >&2; return 1
+		rm -f "$stem" "$tmp"; echo "could not decode a frame from $file" >&2; return 1
 	fi
 	w=$(ffprobe -v error -show_entries stream=width -of default=nw=1:nk=1 "$tmp" | head -1)
 	h=$(ffprobe -v error -show_entries stream=height -of default=nw=1:nk=1 "$tmp" | head -1)
-	rm -f "$tmp"
+	rm -f "$stem" "$tmp"
+
+	# Refuse what cannot be measured. A missing or non-numeric dimension makes `[ "$h" -le "$w" ]`
+	# ERROR, and an `if` reads an erroring condition as FALSE — so the guard used to accept the clip
+	# it had just failed to measure. That is the same fail-open shape as the trailing comma on this
+	# camera's csv output, which is the bug this guard exists to replace.
+	case "$w" in ''|*[!0-9]*) w="";; esac
+	case "$h" in ''|*[!0-9]*) h="";; esac
+	if [ -z "$w" ] || [ -z "$h" ]; then
+		echo "REFUSING: could not measure a decoded frame from $file." >&2
+		echo "  Refusing rather than guessing — a wrong guess here squashes the delivery." >&2
+		return 1
+	fi
+
 	if [ "$h" -le "$w" ]; then
 		echo "REFUSING: $file decodes as ${w}x${h}, not portrait." >&2
 		echo "  Vertical delivery would squash it. Fix the source orientation, then retry." >&2
@@ -179,4 +230,152 @@ require_nonempty() {
 		echo "$label FAILED — $file missing or empty" >&2
 		return 1
 	fi
+}
+
+# A stabilisation transform is measured against the DECODED frame, so re-orienting a source
+# invalidates it: the .trf then describes motion in a frame that no longer exists, and the warp
+# fights footage it was never measured on. Nothing announces that — the render just comes out
+# subtly wrong. Same freshness rule ensure_tone_lut applies to shipped.cube against look.json.
+#
+# The reference is always the SOURCE CLIP, never an intermediate. Transforms are motion-only and
+# survive a re-grade, so a re-rendered master says nothing about whether the camera moved — and
+# comparing against one made every transform grade.sh wrote go stale the moment a master
+# re-rendered, silently sending the delivery out unstabilised.
+#
+# No source, no verdict: refuse. A stale transform fights footage it was never measured on, which
+# is visibly wrong output, where dropping stabilisation is merely less good.
+transform_is_fresh() {  # transform_is_fresh <trf> <source-clip>
+	[ -f "$1" ] || return 1
+	[ -f "$2" ] || return 1
+	[ "$1" -nt "$2" ]
+}
+
+# --- the delivery chain -------------------------------------------------------
+# ONE definition of the tail every deliverable shares: the stabilisation warp, the chroma denoise,
+# the crop, the 10->8 bit reduction, the sharpener and the grain blend.
+#
+# This lived in THREE copies — 03-final-reels.sh, 03-final-feed.sh and grade.sh's render() — and
+# had already drifted three ways, which is why it is here now: the 40-line grain rationale existed
+# in the reels copy only, grade.sh hardcoded the grain plate's frame rate at 24 where the others
+# probed it, and only the stage-3 copies checked disk space. Every constant below is measured, and
+# the notes say by what. Nothing here is a style preference.
+
+# ffprobe's csv output carries a TRAILING COMMA on this camera's files, and `r=30000/1001,` inside
+# a lavfi source string is a parse error, not merely a wrong number. Query the field on its own
+# and validate the shape before trusting it. 24 is the fallback because that is what this camera
+# shoots; a wrong-but-plausible rate makes temporal grain step instead of updating per frame.
+source_fps() {  # source_fps <file>
+	local fps
+	fps=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate \
+		-of default=nw=1:nk=1 "$1" 2>/dev/null | grep -E '^[0-9]+(/[0-9]+)?$' | head -1)
+	printf '%s\n' "${fps:-24}"
+}
+
+# Tag EVERY synthesised branch. A lavfi source carries no colourspace metadata, and ffmpeg
+# negotiates formats across the WHOLE graph — so an untagged branch propagates "unknown"
+# backwards and a zscale on a different branch fails with "code 3074: no path between
+# colorspaces", pointing at a filter that is not the problem. Every filter was bisected
+# individually and all passed; only the pair fails.
+DELIVERY_SETPARAMS="setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=limited"
+
+# hqdn3d=<luma_spatial>:<chroma_spatial>:<luma_tmp>:<chroma_tmp>. The luma terms are ZERO on
+# purpose: this must not touch image detail. It exists because saturation 1.27 amplifies the
+# chroma error already present on high-contrast edges (measured: the street sign's white-on-blue
+# lettering gains a visible cyan fringe between baseline and graded), and the 4:2:0 conversion at
+# export coarsens it further. Verified chroma-only: luma YAVG 486.97 -> 487.02.
+DELIVERY_CHROMA="hqdn3d=0:5:0:6,"
+
+# `shortest=1` on the blend is REQUIRED, and `-shortest` is not a substitute. The grey plate is an
+# infinite lavfi source; with filter_complex, `-shortest` does not reliably stop the encode, so the
+# render runs forever and the output grows without bound (observed: a 26s clip past 189MB and still
+# going, with no moov atom ever written). The blend option terminates on the shortest input, which
+# is the video.
+# shellcheck disable=SC2034  # spliced into filter graphs by the stage scripts, not used here
+DELIVERY_BLEND="blend=all_mode=grainmerge:shortest=1"
+
+# The warp resamples BEFORE the downscale, so it happens at master resolution rather than at
+# delivery size. The trailing comma belongs to the prefix: callers splice the result directly into
+# a filter chain, and an absent transform must leave no trace.
+stab_prefix() {  # stab_prefix <trf> <smoothing>
+	printf "vidstabtransform=input='%s':smoothing=%s:optzoom=1:interpol=bicubic,unsharp=5:5:0.2:3:3:0.0," \
+		"$1" "$2"
+}
+
+# Grain and sharpen come AFTER the downscale, not before: grain sized for the 4K master is crushed
+# to invisibility once scaled to 1080p, and sharpening pre-resize is blurred back out by the
+# resize.
+#
+# zscale (not scale) does the reduction because only zscale actually DITHERS the 10->8 bit step.
+# Verified: `scale=...,format=yuv420p` and `-sws_dither ed` produce byte-identical output, i.e.
+# neither dithers at all, while zscale's error_diffusion differs — and it matters on this footage,
+# which has a large flat sky where banding would show.
+#
+# The dither happens HERE, at the reduction, and not after the blend: the grey plate carries no
+# colourspace metadata, so a zscale placed after `blend` has no input space to convert from and
+# dies with "code 3074". The plate is already 8-bit, so dithering it again bought nothing anyway.
+delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-prefix>
+	printf '%s%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=yuv420p,unsharp=5:5:0.4:5:5:0.0' \
+		"$3" "$DELIVERY_CHROMA" "$4" "$1" "$2"
+}
+
+# CLUSTERED grain, not per-pixel, generated on a half-resolution plate and blended. Measured:
+#
+#   1. Per-pixel grain does not survive delivery. Re-encoded at ~4 Mbps its lag-1 autocorrelation
+#      goes 0.00 -> 0.39: the compressor smears it into blobs and invents correlation that was
+#      never there. Half-resolution grain keeps its own structure through the same re-encode
+#      (0.75 -> 0.59).
+#   2. Clustered is also CHEAPER: bitrate against no grain is 3.7x per-pixel, 2.9x clustered. More
+#      filmic and ~22% cheaper to encode, which is not the usual trade. (`-tune grain` was tested
+#      too: 4.3x bitrate for no structural gain. Skipped.)
+#   3. It must come after the sharpener. Grain before `unsharp` gets RUNG by it — the isolated
+#      residual shows a negative lag-1 (-0.09), the signature of an overshoot either side of every
+#      spike, which reads as "crunchy digital" rather than film. It is also WEAKER than intended
+#      (sd 2.65 vs 3.67 at the same c0s) because the sharpener averages it away.
+#
+# The plate is flat grey so its chroma stays neutral and `grainmerge` is a no-op on the chroma
+# planes — measured U-plane residual sd 0.000, i.e. verifiably luma-only. That matters because the
+# hqdn3d pass exists to clean chroma up, and grain must not put any back.
+#
+# c0s is the one number that wants an eye rather than a measurement. 8 reads as "subtle";
+# clustered grain reads stronger per unit amplitude than per-pixel, so it sits below the old 6.
+grain_plate() {  # grain_plate <w> <h> <fps>
+	printf 'color=c=gray:s=%sx%s:r=%s' "$(( $1 / 2 ))" "$(( $2 / 2 ))" "$3"
+}
+
+delivery_grain_branch() {  # delivery_grain_branch <w> <h> <strength>
+	printf 'noise=c0s=%s:c0f=t,scale=%s:%s:flags=bilinear,format=yuv420p,%s' \
+		"$3" "$1" "$2" "$DELIVERY_SETPARAMS"
+}
+
+# Renders to a staging file and installs it only once the render has succeeded, been checked for
+# content, and had its colour tags verified. Takes the FINAL path, a label for messages, then every
+# ffmpeg argument except the output path.
+#
+# WHY THIS EXISTS. `ffmpeg -y` pointed straight at the delivery path TRUNCATES the existing file
+# before it knows whether the filter graph even initialises. Measured: an approved mp4 re-rendered
+# with a graph that fails at init was left at 0 bytes, ffmpeg exiting 234. require_nonempty then
+# reports the failure loudly — but the approved deliverable is already gone, and per
+# docs/adr/0004 getting it back means regenerating the baseline and the master first.
+#
+# This is the same incident this file's header describes for the retag remux, and the same staging
+# 00-stabilise-detect.sh uses for its .trf. The render path was the only one without it.
+render_delivery() {  # render_delivery <final-out> <label> <ffmpeg-arg>...
+	local out="$1" label="$2"
+	shift 2
+	local tmp="${out%.*}.partial.${out##*.}"
+	rm -f "$tmp"          # a staging file left by an earlier interrupted run
+
+	if ! ffmpeg "$@" "$tmp" -v error; then
+		rm -f "$tmp"
+		echo "$label FAILED (ffmpeg error) — $out left exactly as it was" >&2
+		return 1
+	fi
+	if ! require_nonempty "$tmp" "$label"; then
+		rm -f "$tmp"
+		echo "  $out left exactly as it was" >&2
+		return 1
+	fi
+	# Tag before installing, so the file that lands is the one that was verified.
+	safe_retag "$tmp" -movflags +faststart >/dev/null
+	mv "$tmp" "$out"
 }

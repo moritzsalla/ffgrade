@@ -24,5 +24,8 @@ standardised references are what proved it rather than a preference.
 
 Display-space shaping cannot recover highlight detail the CST has already compressed. It is
 workable because the CST does not clip on this footage (YMAX 884/1023), so there is room to shape.
-`make-filmic-lut.py` and `luts/filmic/` are kept: the architecture is right and may win with
-proper gamut mapping. They are a dead end on record, not dead code to delete.
+`scripts/make-filmic-lut.py` is kept: the architecture is right and may win with proper gamut
+mapping. It is a dead end on record, not dead code to delete. The generated cubes under
+`luts/filmic/` are gitignored — they are reproducible output, so a fresh clone has only
+`SOURCE.txt` and regenerates from the script. The measurements that decided this live in this file,
+not in those files.

@@ -176,6 +176,20 @@
           <span class="status" id="status">connecting…</span>
         </div>
         <details>
+          <summary>load the current look.json</summary>
+          <p class="status">
+            Paste the repo's look.json here and press Load. The sliders start from the shipped
+            look, and the blocks this tool does not edit (grain, stabilisation, match) are carried
+            through unchanged instead of being dropped.
+          </p>
+          <textarea id="loadin" rows="6" spellcheck="false"
+                    style="width:100%;font:11px ui-monospace,monospace"></textarea>
+          <div class="row">
+            <button class="btn" id="load">Load</button>
+            <span class="status" id="loadstatus"></span>
+          </div>
+        </details>
+        <details>
           <summary>look.json being sent</summary>
           <pre id="out"></pre>
           <div class="row"><button class="btn" id="copy">Copy look.json</button></div>
@@ -240,6 +254,39 @@
 
   var P = {}, DEFAULTS = {};
   [].concat(TONE, COLOUR).forEach(function (c) { P[c.id] = c.val; DEFAULTS[c.id] = c.val; });
+
+  // Blocks look.json carries that this tool does not edit. Emitting a file without them is not a
+  // harmless omission: look() has no fallbacks, so every entry point ABORTS on the first missing
+  // key. Before this existed the Bench emitted tone and colour only, while the scripts asked for
+  // grain.strength, stabilisation.smoothing and match.reference_yavg — so the workflow the README
+  // describes ("the settings come back as look.json, the single source every stage reads") could
+  // not actually complete. They are carried through verbatim rather than re-declared here,
+  // because a second copy of a value is the drift look.json exists to prevent.
+  var PASSTHROUGH = null;
+
+  // The slider defaults above are a STARTING POINT for a new grade, not the shipped look, so the
+  // tool used to open on — and Reset back to — a grade nobody ships. Loading the real look.json
+  // seeds both.
+  function loadLook(text) {
+    var incoming = JSON.parse(text);
+    var seeded = 0;
+    [].concat(TONE, COLOUR).forEach(function (c) {
+      var block = c.id === "sat" || c.id === "warm" ? incoming.colour : incoming.tone;
+      var key = c.id === "sat" ? "saturation" : c.id === "warm" ? "warmth" : c.id;
+      if (block && typeof block[key] === "number") {
+        P[c.id] = DEFAULTS[c.id] = block[key];
+        if (c._input) { c._input.value = String(block[key]); c._sync(); }
+        seeded++;
+      }
+    });
+    PASSTHROUGH = {};
+    Object.keys(incoming).forEach(function (k) {
+      if (k !== "tone" && k !== "colour") { PASSTHROUGH[k] = incoming[k]; }
+    });
+    render();
+    writeOut();
+    return seeded;
+  }
 
   var pos = {};
   SAMPLERS.forEach(function (s) { pos[s.key] = s.def.slice(); });
@@ -442,15 +489,28 @@
   function writeOut() {
     // Emit look.json verbatim — the pipeline's single source for the look. A grade sent from here
     // is copied into the repo's look.json as-is, so there is no translation step to get wrong.
-    var look = {
-      tone: {
-        gamma: +P.gamma.toFixed(3), pivot: +P.pivot.toFixed(3),
-        contrast: +P.contrast.toFixed(3), toe: +P.toe.toFixed(3),
-        shoulder: +P.shoulder.toFixed(3), black: +P.black.toFixed(4)
-      },
-      colour: { saturation: +P.sat.toFixed(3), warmth: +P.warm.toFixed(4) }
+    // That only holds if the file is COMPLETE, which is why the non-edited blocks are carried
+    // through from a loaded file rather than omitted.
+    var look = {};
+    if (PASSTHROUGH && PASSTHROUGH._comment) { look._comment = PASSTHROUGH._comment; }
+    look.tone = {
+      gamma: +P.gamma.toFixed(3), pivot: +P.pivot.toFixed(3),
+      contrast: +P.contrast.toFixed(3), toe: +P.toe.toFixed(3),
+      shoulder: +P.shoulder.toFixed(3), black: +P.black.toFixed(4)
     };
-    document.getElementById("out").textContent = JSON.stringify(look, null, 2);
+    look.colour = { saturation: +P.sat.toFixed(3), warmth: +P.warm.toFixed(4) };
+    if (PASSTHROUGH) {
+      Object.keys(PASSTHROUGH).forEach(function (k) {
+        if (k !== "_comment") { look[k] = PASSTHROUGH[k]; }
+      });
+    }
+    var text = JSON.stringify(look, null, 2);
+    if (!PASSTHROUGH) {
+      // Fail loudly rather than hand over a file that stops every script on its first look() call.
+      text = "// INCOMPLETE — load the repo's look.json first (see the panel above).\n" +
+             "// Pasting this over look.json will abort every stage on a missing key.\n" + text;
+    }
+    document.getElementById("out").textContent = text;
   }
 
   function loadImage(srcUrl, name) {
@@ -514,6 +574,21 @@
     [].concat(TONE, COLOUR).forEach(function (c) {
       c._input.value = DEFAULTS[c.id]; P[c.id] = DEFAULTS[c.id]; c._sync();
     });
+  });
+
+  document.getElementById("load").addEventListener("click", function () {
+    var status = document.getElementById("loadstatus");
+    var text = document.getElementById("loadin").value.trim();
+    if (!text) { status.textContent = "paste look.json first"; return; }
+    try {
+      var n = loadLook(text);
+      status.textContent = "loaded " + n + " values; other blocks will be carried through";
+    } catch (err) {
+      // Say what went wrong rather than half-applying it: a partial load would put the tool back
+      // in the state this panel exists to prevent.
+      PASSTHROUGH = null;
+      status.textContent = "could not parse that as look.json (" + err.message + ")";
+    }
   });
 
   document.getElementById("copy").addEventListener("click", function () {

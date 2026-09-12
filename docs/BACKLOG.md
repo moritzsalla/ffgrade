@@ -9,16 +9,12 @@ black point lifted 0.015 → 0.025 with gamma eased 2.09 → 2.02 (shadow detail
 chroma-only denoise for the sign shimmer, and clustered grain moved after the sharpener. Until
 that is judged, the other 18 clips should not be rendered against it.
 
-**Run the remaining 18 clips.** Per-clip procedure in `docs/BATCH_RUNBOOK.md`. Two things there
-are per-clip and must not be inherited from IMG_0609: the Feed crop offset (750 is this clip's
-composition only) and the rotation class.
+**Run the remaining 18 clips.** Per-clip procedure in `docs/BATCH_RUNBOOK.md`. One thing there is
+per-clip and must not be inherited from IMG_0609: the Feed crop offset, since 750 is this clip's
+composition only. `grade.sh` now refuses `FEED=1` across several clips unless `CROP_Y` is passed
+deliberately, so that can no longer happen by accident.
 
 ## Worth doing next
-
-**Externalise the look to a config file.** The shipped look is currently constants at the top of
-`scripts/02-grade.sh` and `scripts/grade.sh`. If the Bench wrote a `look.json` that both read, the
-Bench becomes the settings app and the engine stays dumb — which is the split the workflow already
-implies. Small change, removes the last reason to edit a script to change a look.
 
 **A drag-and-drop wrapper.** A Folder Action or droplet: drop a folder, finals appear, a plain
 report says what happened. `scripts/grade.sh` is already the engine — folder in, finals out, no

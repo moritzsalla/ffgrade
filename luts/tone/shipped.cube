@@ -1,4 +1,4 @@
-TITLE "Filmic tone shaping (pivot=0.39 contrast=1.09 toe=0.0 shoulder=0.1 black=0.025)"
+TITLE "Filmic tone shaping (gamma=2.02 pivot=0.39 contrast=1.09 toe=0.0 shoulder=0.1 black=0.025)"
 
 LUT_1D_SIZE 4096
 

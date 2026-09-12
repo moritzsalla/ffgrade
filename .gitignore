@@ -14,8 +14,9 @@ dist/*
 dist/*/*
 !dist/*/.gitkeep
 
-# Generated LUTs from the search that found the shipped one. The parameters that produce them are
-# recorded in scripts/02-grade.sh's header, so the files themselves are reproducible output.
+# Generated LUTs from the search that found the shipped one. The parameters that produce them live
+# in look.json, and scripts/make-tone-lut.py stamps them into each cube's TITLE, so the files
+# themselves are reproducible output.
 luts/tone/variants/
 luts/filmic/*.cube
 
@@ -27,8 +28,13 @@ luts/apple/*.zip
 
 # Belt-and-braces: no video or camera-raw file ever belongs in this repo, wherever it lands.
 # GitHub rejects files over 100MB outright and warns over 50MB; a single clip here is 0.4-2GB.
+# Both cases: this repo is on a case-insensitive volume, so *.mov already catches IMG_0609.MOV
+# here — but a clone onto a case-sensitive filesystem would not, and the camera does write
+# uppercase. Costs nothing to be explicit.
 *.mov
+*.MOV
 *.mp4
+*.MP4
 *.m4v
 *.avi
 *.mkv
@@ -48,3 +54,11 @@ luts/apple/*.zip
 # Backup copies of generated LUTs — regenerate from the parameters in scripts/02-grade.sh.
 *.cube.prev
 .workdir
+
+# Python byte-cache. Appears the moment anything imports a script in scripts/ or tests/.
+__pycache__/
+*.pyc
+
+# Working notes: specs and tickets for work in progress. The substance belongs in a commit message,
+# docs/BACKLOG.md or an ADR by the time the work lands, so this is deliberately disposable.
+.scratch/

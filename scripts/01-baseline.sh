@@ -1,11 +1,13 @@
 #!/bin/bash
-# Stage 1: source -> baseline (Log->Rec709 CST, correct color tags, optional rotation fix).
+# Stage 1: source -> baseline (Log->Rec709 CST, correct colour tags).
 # Usage: ./01-baseline.sh IMG_XXXX
 #
-# Rotation is NOT handled here. The source is assumed to be correctly oriented — that is an ingest
-# concern, not a grading one, and no NLE fixes it for you either. If a clip is sideways or upside
-# down, normalise it first with scripts/normalise-rotation.sh; the guard below refuses it rather
-# than grading a sideways frame and leaving you to notice later.
+# Rotation is NOT handled anywhere in this pipeline. Orientation is an ingest concern and the
+# source is trusted — see docs/adr/0005 and CLAUDE.md. This stage does not check it either: a
+# baseline is not a deliverable, so a sideways clip here is merely sideways. The refusal lives in
+# the two final stages, where a landscape frame would be silently squashed into a vertical
+# delivery. That is the failure worth catching, and catching it costs a decode, so it is paid once
+# at the point where it matters.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -27,7 +29,10 @@ OUT="$WORK/dist/01-baseline/${CLIP}_baseline.mov"
 	echo "Download it (free Apple ID, ~2 min) per luts/apple/SOURCE.txt, then re-run." >&2
 	exit 1
 }
-check_disk_space "$ROOT/dist" 10
+check_disk_space "$WORK/dist" 10
+# Create the output directory rather than relying on the checked-in dist/*/.gitkeep
+# markers: with a work dir set, those live in the repo and the output does not.
+mkdir -p "$(dirname "$OUT")"
 
 FILTER="lut3d=file='${LUT}':interp=tetrahedral"
 

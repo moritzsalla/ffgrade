@@ -37,6 +37,7 @@ USAGE
     --black     black point lift (>0) or crush (<0), applied last.
 """
 import argparse
+import os
 
 SIZE = 4096
 
@@ -53,6 +54,37 @@ def soft(x, k):
     return x + k * (x * x * (3 - 2 * x) - x)
 
 
+def fingerprint(a):
+    """The TITLE line, which doubles as the freshness test for a generated cube.
+
+    ensure_tone_lut used to compare the cube's mtime against look.json's. git does not preserve
+    mtimes, so on every fresh clone the committed cube lands NEWER than look.json and is trusted
+    forever — verified: with look.json backdated and contrast changed to 0.5, the stale 1.09 curve
+    stayed in place in silence. Comparing content instead removes the whole failure class.
+
+    The old TITLE recorded every parameter except gamma, which is the one that was re-tuned, so a
+    committed cube could not be traced to the gamma it was built at.
+    """
+    return (
+        'TITLE "Filmic tone shaping '
+        f"(gamma={a.gamma} pivot={a.pivot} contrast={a.contrast} "
+        f'toe={a.toe} shoulder={a.shoulder} black={a.black})"'
+    )
+
+
+def is_current(path, a):
+    """True when `path` already encodes exactly these parameters.
+
+    The format lives here, in one place, rather than being reimplemented in shell — a second copy
+    of a fingerprint format is just the drift it exists to detect, one level down.
+    """
+    try:
+        with open(path) as fh:
+            return fh.readline().rstrip("\n") == fingerprint(a)
+    except OSError:
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out")
@@ -64,9 +96,14 @@ def main():
     ap.add_argument("--black", type=float, default=0.0)
     a = ap.parse_args()
 
+    # Idempotent by design, so callers can invoke it unconditionally and drop their own staleness
+    # logic. Generating the 4096-entry table costs ~0.1s, so there is nothing to save by guessing.
+    if is_current(a.out, a):
+        print(f"{a.out} is already current")
+        return
+
     lines = [
-        f'TITLE "Filmic tone shaping (pivot={a.pivot} contrast={a.contrast} '
-        f'toe={a.toe} shoulder={a.shoulder} black={a.black})"',
+        fingerprint(a),
         "",
         f"LUT_1D_SIZE {SIZE}",
         "",
@@ -91,7 +128,19 @@ def main():
         v = max(0.0, min(1.0, v))
         lines.append(f"{v:.8f} {v:.8f} {v:.8f}")
 
-    open(a.out, "w").write("\n".join(lines) + "\n")
+    # Write then rename, never write in place. ensure_tone_lut decides freshness from the .cube's
+    # mtime against look.json's, so a truncated file from an interrupted or short write would be
+    # considered fresh forever and silently grade every clip through a partial curve. Same failure
+    # class 00-stabilise-detect.sh guards with its .partial file, one layer down.
+    partial = a.out + ".partial"
+    try:
+        with open(partial, "w") as fh:
+            fh.write("\n".join(lines) + "\n")
+        os.replace(partial, a.out)
+    except BaseException:
+        if os.path.exists(partial):
+            os.unlink(partial)
+        raise
     print(f"wrote {a.out} ({SIZE}-entry 1D LUT)")
 
 

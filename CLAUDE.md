@@ -10,8 +10,14 @@ what you measure against and depart from deliberately, and a *baseline* is not a
 ## Run this before trusting any change
 
 ```sh
-./scripts/check.sh        # shellcheck, curve parity, 17 bats tests
+./scripts/check.sh        # shellcheck, curve parity, the bats suite
 ```
+
+A **missing tool now fails the run** rather than skipping quietly. This command used to exit 0
+having run only bats, so "green" could mean "linted nothing and never compared the curves". Use
+`--allow-skips` to accept a partial run on purpose. Don't write the test count down anywhere: it is
+printed, and a number in prose goes stale by construction — the README said 20 while the suite said
+42.
 
 **shellcheck and bats are not substitutes for each other.** shellcheck reported ZERO issues in
 scripts that contained two shipped, load-bearing bugs. bats found both, because it runs the code on
@@ -63,15 +69,31 @@ don't expect.
    the obvious way reports every clip silent. `-map 0:a:0?` for ffmpeg is unaffected — different
    code path.
 3. **A trailing comma** on csv output (`3840,2160,`), so `${dims##*,}` is empty and a numeric
-   comparison fails open. This is how the portrait guard shipped accepting landscape clips.
+   comparison fails open. This is how the portrait guard shipped accepting landscape clips — and
+   how `probe_tags` returned `bt709,bt709,bt709,` and made `verify_bt709` unable to pass on a
+   camera-structured file no matter how it was tagged. Both are fixed by querying one field at a
+   time; the comma appears on camera originals and on `-c copy` excerpts of them, but not on the
+   pipeline's own re-encodes, so it hides until real footage reaches it.
 
 Query fields individually with `-of default=nw=1:nk=1` and validate with a regex. Never trust a
 single-line ffprobe answer without checking what it actually printed.
 
 ## Testing rules
 
+- **Never write a bare `[[ ... ]]` assertion.** In bats 1.14 a `[[ ]]` that returns false in the
+  *middle* of a test body does not fail the test: `[[` is a shell keyword and the mechanism bats
+  uses to spot a failure only tracks simple commands, so the verdict comes from the body's LAST
+  command. `[` is a builtin and behaves as expected. Every `[[ ]]` in `tests/lib.bats` therefore
+  ends in `|| fail "..."`, which is a function call and so is seen. This had already hidden a real
+  defect: a test stayed green while the message it asserts on was renamed. Do not tidy the guard
+  away.
 - **Mutation-test anything you add.** Break the guard, confirm the test goes red. Two tests here
-  passed against a *removed* guard before this was done.
+  passed against a *removed* guard before this was done, and two more passed against a removed
+  guard again afterwards for the `[[ ]]` reason above. Apply the mutation and *verify it applied* —
+  a `perl -0pi -e` whose pattern silently fails to match proves nothing, and looked like a pass.
+- **The production filter graph needs a real render.** shellcheck cannot see inside a filter
+  string, the parity check touches only the tone curve, and a `DRY=1` run never builds the graph.
+  `PROOF=<seconds>` renders through the identical chain, which is what the suite uses.
 - **Synthetic fixtures cannot reproduce this camera's quirks.** A generated ProRes file prints one
   clean ffprobe line; a real clip prints three with a trailing comma. Tests covering those
   behaviours must use real footage from `src/` and skip when it is absent.
@@ -86,10 +108,29 @@ single-line ffprobe answer without checking what it actually printed.
   the grade, not an error. Do not "correct" it toward the reference.
 - **Rotation is an ingest concern.** No rotation logic in the pipeline; the source is trusted. The
   one guard decodes a frame and measures it, refusing non-portrait rather than squashing it.
-- **The scene-linear filmic route was tried and lost on colour.** Kept in `luts/filmic/` with its
-  measurements. See `docs/adr/0002_KEEP_APPLES_CST.md`.
-- **Look values live in `look.json`,** never hardcoded in a script. `shipped.cube` regenerates from
-  it automatically when it goes stale.
+- **The scene-linear filmic route was tried and lost on colour.** Its measurements are in
+  `docs/adr/0002_KEEP_APPLES_CST.md`; the cubes themselves are gitignored, so `luts/filmic/` holds
+  only `SOURCE.txt` on a fresh clone and is regenerated from `scripts/make-filmic-lut.py`.
+- **Look values live in `look.json`,** never hardcoded in a script. `grade.sh` broke this with its
+  own copy of the tone block, so a grade from the Bench changed `shipped.cube` and the staged path
+  while production kept rendering the old tone. `look()` has **no fallbacks** on purpose: a missing
+  key must stop the run, not substitute a different look. That makes the key set a contract, and a
+  test checks the scripts and `look.json` against each other.
+- **`shipped.cube` freshness is by CONTENT, not mtime.** Each generated cube stamps its parameters
+  into its `TITLE` and `make-tone-lut.py` skips the write when they already match. mtime cannot
+  work: git does not preserve it, so on a fresh clone the committed cube always lands newer than
+  `look.json` and would be trusted forever.
+- **The delivery chain lives once, in `lib.sh`.** Stabilisation warp, chroma denoise, crop, the
+  10→8 bit reduction, sharpener and grain blend were three copies (two stage-3 scripts plus
+  `grade.sh`) and had drifted three ways. The two stage-3 scripts are now one `03-final.sh`
+  parameterised by target. The measurements that justify each filter live next to the builder.
+- **Never point `ffmpeg -y` at a delivery path.** It truncates the existing file before it knows
+  whether the graph initialises, so a failed re-render destroys the approved deliverable — measured
+  at 0 bytes with ffmpeg exiting 234. Use `render_delivery`, which stages, checks and tags before
+  installing. A test pins this, because it was reintroduced once while rewriting stage 3.
+- **Orientation is settled in ADR 0005, the media layout in ADR 0006.** Removing rotation in pieces
+  left a runbook step telling you to pass an argument that was silently ignored; when a concept is
+  deleted, grep for its name in prose too.
 
 ## Style
 

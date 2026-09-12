@@ -12,34 +12,15 @@ source, 4K24, locked stabilization. Consistent look across posts (Kodak Portra e
 Working clip: IMG_0609.mov — the test clip the whole recipe was developed against before
 being run across the rest of the shoot.
 
-## Folder structure & naming convention
+## Naming convention
 
-```
-src/            Original iPhone footage. NEVER modified, NEVER moved out of this folder.
-luts/
-  apple/          Apple's official Log→Lin and Log→Rec709 conversion LUTs (Apple Developer
-                  download, free Apple ID, no paid Program needed).
-  looks/          Creative look LUTs (currently: Kodak Portra 400 film emulation).
-dist/
-  01-baseline/    <clip>_baseline.mov  — Log→Rec.709 CST + rotation fix + correct color tags.
-                  Neutral, technically-correct, no creative decisions. ProRes 422 HQ, 10-bit 4:2:2.
-  02-graded/      <clip>_graded.mov    — baseline + creative look (Portra LUT). This is the
-                  MASTER: re-gradable, re-exportable for any future platform/crop. ProRes 422 HQ.
-  03-final/       <clip>_final.mp4     — delivery encode: downscaled to 1080x1920, grain,
-                  sharpen, H.264, ready to upload to Instagram.
-  scripts/        Reusable shell scripts for each stage, parameterized by clip filename.
-docs/
-  PIPELINE.md     This file.
-```
-
-Naming: `<original-filename-stem>_<stage>.<ext>`. Never rename the original iPhone filename stem
+`<original-filename-stem>_<stage>.<ext>`. Never rename the original iPhone filename stem
 (IMG_0609 etc.) — it's the join key back to `src/` and to the phone's own capture order.
 
-The tree and the stage-3 name above are the shape this document was started with; both have since
-moved on. `luts/` also holds `tone/` and `filmic/`, `dist/` also holds `proofs/` and `grader/`,
-and a final is named for its **deliverable**, not for being final — `<clip>_reels-stories_9x16.mp4`
-and `<clip>_feed_4x5.mp4`, not `<clip>_final.mp4`. README.md carries the current tree; `CONTEXT.md`
-carries which word means what.
+A final is named for its **deliverable**, not for being final: `<clip>_reels-stories_9x16.mp4` and
+`<clip>_feed_4x5.mp4`. **README.md carries the folder tree** and is the only copy of it; this file
+used to carry a second one, which drifted and then had a paragraph underneath explaining that the
+tree above it was wrong. `CONTEXT.md` carries which word means what.
 
 ## Pipeline stages
 
@@ -47,14 +28,15 @@ carries which word means what.
 
 Purely technical, zero creative judgment:
 
-- **Rotation.** iPhone ProRes files carry rotation as a QuickTime display-matrix flag, not
-  pixel-level rotation. ffmpeg autorotate handles this by default — do NOT add a manual
-  `transpose` filter; it fights the auto-correction and can double-rotate (found the hard way:
-  two manual transpose attempts both produced landscape-looking garbage because ffmpeg was
-  already applying the matrix underneath them). If a clip *still* comes out rotated wrong after
-  leaving autorotate alone, the fix is `vflip,hflip` (180°) on top of the auto-corrected output,
-  not a fresh transpose guess — confirmed against IMG_0609 by comparing frame previews before
-  baking anything in.
+- **No rotation.** Orientation is an ingest concern and the source is trusted; see
+  `docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md`. This stage applies no rotation and accepts
+  no rotation argument. The single guard lives in the delivery stage, where `require_portrait`
+  decodes a frame and measures it, refusing a landscape clip rather than squashing it.
+
+  Kept because it cost real time: iPhone ProRes carries rotation as a QuickTime display-matrix
+  flag, not pixel-level rotation, and ffmpeg autorotates on decode. A manual `transpose` therefore
+  fights the auto-correction and double-rotates — two attempts both produced landscape-looking
+  garbage. That is why the pipeline reasons about a decoded frame and never about a display matrix.
 - **Apple Log → Rec.709.** Apple's own 65³ LUT (`luts/apple/AppleLogToRec709-v1.0.cube`), not a
   hand-rolled curve — the log transfer function is proprietary and ffmpeg has no built-in support
   for it. `interp=tetrahedral` (more accurate than trilinear, worth the extra render time on a
@@ -235,6 +217,15 @@ standardised**. This shot happens to contain three:
 All three are **in shade** here, so absolute values will read darker/cooler than spec. Use them as
 **hue and ratio** references (G/R, B/G, channel purity), not absolute exposure references.
 
+The crops themselves, as measured:
+
+| ![licence plate](reference-licence-plate.png) | ![traffic signs](reference-traffic-signs.png) |
+|---|---|
+| RAL 1021 on the Volvo | RAL 5017 and RAL 3020 on the parking and 30 km/h signs |
+
+And the two independent checks on what the building's colour actually is, used in "A theory this
+disproved" below: ![Apple Maps](reference-apple-maps.png) ![Street View](reference-street-view.png)
+
 ### What they proved
 
 Tracing the plate through the pipeline (G/R, target 0.80):
@@ -280,6 +271,12 @@ map reference before concluding a grade has "lost" colour that was never there.
 Calibrating to standardised colours got the image *accurate* and it still looked flat — accuracy
 is not a grade. The remaining deficiency was tonal: no shadow density, no separation, everything
 in a narrow band. Two approaches were built and measured.
+
+The variant sweeps these conclusions came from, assembled by hand from `dist/ladders/`:
+
+| ![tone ladder](grade-ladder-tone.png) | ![variant ladder](grade-ladder-variants.png) | ![warmth ladder](grade-ladder-warmth.png) |
+|---|---|---|
+| tone curve steps | whole-look variants | warmth steps |
 
 ### Approach A — replace the CST entirely (`scripts/make-filmic-lut.py`)
 

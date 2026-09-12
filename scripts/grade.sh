@@ -1,11 +1,19 @@
 #!/bin/bash
-# grade — one clip, one ffmpeg pass, source to deliverable.
+# grade.sh — one clip, one ffmpeg pass, source to deliverable.
 #
 # Usage:
-#   ./scripts/grade <folder|clip.mov> [...]      process a shoot folder or named clips
-#   FEED=1 ./scripts/grade <folder>              also emit the 4:5 Feed crop
-#   STAB=0 ./scripts/grade <folder>              skip stabilisation (faster)
-#   DRY=1  ./scripts/grade <folder>              plan only, render nothing
+#   ./scripts/grade.sh <folder|clip.mov> [...]   process a shoot folder or named clips
+#
+# Every knob is an environment variable, and this list is the only place they are documented:
+#   FEED=1            also emit the 4:5 Feed crop (refused across several clips without CROP_Y)
+#   CROP_Y=<px>       vertical offset of the 4:5 crop window on the 2160x3840 master (default 750,
+#                     which is IMG_0609's composition — it is a per-clip framing call)
+#   STAB=0            skip stabilisation entirely (faster)
+#   SMOOTHING=<n>     frames of camera-path lowpass; higher is closer to locked-off
+#   MATCH=0           skip exposure matching and use look.json's gamma raw
+#   GRAIN_STRENGTH=<n>  override look.json's grain strength
+#   PROOF=<seconds>   render this many seconds through the real chain into dist/proofs/
+#   DRY=1             plan only, render nothing
 #
 # WHY ONE PASS. The staged pipeline (01-baseline -> 02-grade -> 03-final) writes two ~2.5GB ProRes
 # intermediates per clip and decodes the footage three times. Those intermediates existed so the
@@ -14,9 +22,13 @@
 # encodes, two full decodes and ~5GB of disk per clip. The staged scripts are kept for re-tuning
 # and for the Bench; this is the path for production runs.
 #
-# WHAT IS STILL AUTOMATIC vs WHAT THIS REFUSES TO GUESS:
-#   automatic  rotation class, exposure match, stabilisation, the whole grade, tag verification
-#   refuses    only genuinely unexpected rotations; the Feed crop offset stays a per-clip call
+# WHAT IS AUTOMATIC vs WHAT THIS REFUSES TO GUESS:
+#   automatic  exposure match, stabilisation, the whole grade, tag verification
+#   refuses    a clip that does not decode as portrait, and a Feed crop across several clips
+#              without an explicit CROP_Y — that offset is a composition call per clip
+#
+# Orientation is NOT handled here or anywhere: it is an ingest concern and the source is trusted.
+# See docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md.
 #
 # EXPOSURE MATCHING is the part that makes "one recipe" actually mean "one look". The grade was
 # tuned on a single frame of IMG_0609, ~20 minutes before sunset. Golden hour moves fast; clips
@@ -31,21 +43,45 @@ WORK="$(resolve_work_dir "$ROOT")"
 
 CST="$ROOT/luts/apple/AppleLogToRec709-v1.0.cube"
 LOOK="$ROOT/luts/looks/kodak_portra_400_nc.cube"
-OUT_DIR="$WORK/dist/03-final"
+PROOF="${PROOF:-}"        # PROOF=<seconds> renders a short proof; see the note below
+# Proofs are not deliverables and must never land where someone uploads from.
+if [ -n "$PROOF" ]; then
+	OUT_DIR="$WORK/dist/proofs"
+else
+	OUT_DIR="$WORK/dist/03-final"
+fi
 # Reports are not deliverables — keep them out of the folder someone uploads from.
 REPORT_DIR="$WORK/dist/reports"
-WORK="$WORK/dist/.grade-work"
+# A persistent cache for the per-clip tone LUTs the exposure match generates. It used to be
+# assigned over WORK itself, which left one name meaning two things — and the stabilisation
+# path below was then built from the wrong one, landing at <work>/dist/.grade-work/dist/stab/
+# instead of where 00-stabilise-detect.sh writes. WORK stays the work-dir root.
+CACHE="$WORK/dist/.grade-work"
 
-# --- the frozen look. Change these only to change the look for every clip, everywhere. ---
+# --- the look. Every value comes from look.json; nothing here holds a copy. ---
+# This path used to carry its own tone block while reading colour, grain and stabilisation from
+# look.json, so a grade sent from the Bench updated shipped.cube and the staged path while THIS
+# script kept rendering the previous tone. That is the two-copies-one-edited failure look() was
+# written to end, one layer up. No fallbacks on purpose: a missing value must stop the run, not
+# quietly substitute a different look.
 SAT="$(look .colour.saturation)"; WARM="$(look .colour.warmth)"
-G_PIVOT="0.39"; G_CONTRAST="1.09"; G_TOE="0.00"; G_SHOULDER="0.10"; G_BLACK="0.025"
-G_GAMMA_REF="2.02"          # gamma the look was tuned at...
-Y_REF="609"                 # ...against this post-CST mean (10-bit), measured on IMG_0609
-GRAIN="${GRAIN:-$(look .grain.strength)}"; SMOOTHING="${SMOOTHING:-$(look .stabilisation.smoothing)}"
+G_PIVOT="$(look .tone.pivot)";       G_CONTRAST="$(look .tone.contrast)"
+G_TOE="$(look .tone.toe)";           G_SHOULDER="$(look .tone.shoulder)"
+G_BLACK="$(look .tone.black)"
+G_GAMMA_REF="$(look .tone.gamma)"        # gamma the look was tuned at...
+Y_REF="$(look .match.reference_yavg)"    # ...against this post-CST mean (10-bit), on IMG_0609
+GRAIN_STRENGTH="${GRAIN_STRENGTH:-$(look .grain.strength)}"; SMOOTHING="${SMOOTHING:-$(look .stabilisation.smoothing)}"
 STAB="${STAB:-1}"; FEED="${FEED:-0}"; MATCH="${MATCH:-1}"; DRY="${DRY:-0}"
-SP="setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=limited"
+# PROOF=<seconds> renders that many seconds through the REAL chain, into dist/proofs/ rather than
+# dist/03-final/. Two reasons it exists. docs/BATCH_RUNBOOK.md makes a proof a required sign-off
+# before committing to the slow render, and until now that recipe lived only in shell history. And
+# nothing in the suite executed this filter graph at all: shellcheck cannot see inside the string
+# (it reported clean on both previously shipped load-bearing bugs), the parity check touches only
+# the tone curve, and every other test stops at DRY=1 — so a dropped label here went green and
+# failed three minutes into a 19-clip run.
 
-mkdir -p "$OUT_DIR" "$REPORT_DIR" "$WORK"
+check_disk_space "$WORK/dist" 10
+mkdir -p "$OUT_DIR" "$REPORT_DIR" "$CACHE"
 REPORT="$REPORT_DIR/run-$(date +%Y%m%d-%H%M%S).txt"
 : > "$REPORT"
 say() { echo "$*" | tee -a "$REPORT"; }
@@ -60,8 +96,20 @@ for arg in "$@"; do
 done
 [ "${#CLIPS[@]}" -gt 0 ] || { echo "usage: grade <folder|clip.mov> [...]" >&2; exit 1; }
 
+# The Feed crop is a per-clip judgement — 750 is IMG_0609's composition, chosen to drop the
+# parking-ceiling strip at the top. Applied to a batch it silently reframes 18 other clips, and
+# the files look done. That is CONTEXT.md's "squashed" failure class in another dimension, so it
+# is refused rather than warned about. Setting CROP_Y explicitly is taken as "yes, this offset for
+# all of them", which is a decision someone made rather than a default nobody saw.
+if [ "$FEED" = "1" ] && [ "${#CLIPS[@]}" -gt 1 ] && [ -z "${CROP_Y:-}" ]; then
+	echo "REFUSING: FEED=1 across ${#CLIPS[@]} clips with no CROP_Y." >&2
+	echo "  The 4:5 crop offset is a per-clip framing call; the default 750 is IMG_0609's." >&2
+	echo "  Either run one clip at a time, or pass CROP_Y=<pixels> to accept one offset for all." >&2
+	exit 1
+fi
+
 say "grade run $(date '+%Y-%m-%d %H:%M:%S')  —  ${#CLIPS[@]} clip(s)"
-say "look: sat=$SAT warm=$WARM grain=$GRAIN stab=$STAB exposure-match=$MATCH"
+say "look: sat=$SAT warm=$WARM grain=$GRAIN_STRENGTH stab=$STAB exposure-match=$MATCH"
 say ""
 
 OK=0; SKIPPED=0
@@ -74,27 +122,25 @@ for SRC in "${CLIPS[@]}"; do
 		say "SKIP  $CLIP — not portrait. Fix the source orientation, then retry."
 		SKIPPED=$((SKIPPED+1)); continue
 	fi
-	FIX=""
 
 	# --- exposure match: one cheap probe, not a full pass --------------------------------
 	GAMMA="$G_GAMMA_REF"; YAVG="-"
 	if [ "$MATCH" = "1" ]; then
 		YAVG=$(ffmpeg -v error -ss 1 -i "$SRC" -frames:v 1 \
-			-vf "lut3d=file='${CST}':interp=tetrahedral${FIX},scale=320:-1,signalstats,metadata=print:file=-" \
+			-vf "lut3d=file='${CST}':interp=tetrahedral,scale=320:-1,signalstats,metadata=print:file=-" \
 			-f null - 2>/dev/null | grep -m1 -oE 'YAVG=[0-9.]+' | cut -d= -f2 || true)
 		# `metadata=print:file=-` not plain `metadata=print`: the latter logs at INFO level, which
 		# `-v error` suppresses, so the probe returned EMPTY on every clip and every clip silently
 		# got the reference gamma. The exposure match appeared to run and did nothing.
+		# The solve lives in scripts/solve-gamma.py, not in a python3 -c string here: a degenerate
+		# probe used to raise inside it and take the whole batch down at clip n, and a program
+		# built by interpolation cannot be tested. Arguments go through argv.
 		if [ -n "$YAVG" ]; then
-			GAMMA=$(python3 -c "
-import math
-y=float('$YAVG')/1023.0; r=float('$Y_REF')/1023.0; g=float('$G_GAMMA_REF')
-# solve x_new^g_new = x_ref^g_ref so every clip lands where the look was tuned
-print('%.3f' % max(1.2, min(3.2, g*math.log(r)/math.log(y))))")
+			GAMMA=$("$SCRIPT_DIR/solve-gamma.py" "$YAVG" "$Y_REF" "$G_GAMMA_REF")
 		fi
 	fi
 
-	TONE="$WORK/${CLIP}_tone.cube"
+	TONE="$CACHE/${CLIP}_tone.cube"
 	"$SCRIPT_DIR/make-tone-lut.py" "$TONE" --gamma "$GAMMA" --pivot "$G_PIVOT" \
 		--contrast "$G_CONTRAST" --toe "$G_TOE" --shoulder "$G_SHOULDER" --black "$G_BLACK" >/dev/null
 
@@ -102,35 +148,66 @@ print('%.3f' % max(1.2, min(3.2, g*math.log(r)/math.log(y))))")
 	SFX=""
 	if [ "$STAB" = "1" ]; then
 		TRF="$WORK/dist/stab/${CLIP}.trf"
-		if [ ! -f "$TRF" ] && [ "$DRY" != "1" ]; then
+		if ! transform_is_fresh "$TRF" "$SRC" && [ "$DRY" != "1" ]; then
 			mkdir -p "$(dirname "$TRF")"
-			ffmpeg -v error -y -i "$SRC" -vf "lut3d=file='${CST}':interp=tetrahedral${FIX},vidstabdetect=shakiness=5:accuracy=15:stepsize=6:result=${TRF}.partial" -f null -
+			trap 'rm -f "${TRF}.partial"' EXIT
+			ffmpeg -v error -y -i "$SRC" -vf "lut3d=file='${CST}':interp=tetrahedral,vidstabdetect=shakiness=5:accuracy=15:stepsize=6:result=${TRF}.partial" -f null -
+			require_nonempty "${TRF}.partial" "stabilisation analysis"
 			mv "${TRF}.partial" "$TRF"
+			trap - EXIT
 		fi
-		[ -f "$TRF" ] && SFX="vidstabtransform=input='${TRF}':smoothing=${SMOOTHING}:optzoom=1:interpol=bicubic,unsharp=5:5:0.2:3:3:0.0,"
+		if transform_is_fresh "$TRF" "$SRC"; then
+			SFX="vidstabtransform=input='${TRF}':smoothing=${SMOOTHING}:optzoom=1:interpol=bicubic,unsharp=5:5:0.2:3:3:0.0,"
+			say "      stabilising from $TRF (smoothing=${SMOOTHING})"
+		elif [ -f "$TRF" ]; then
+			say "      stale transform at $TRF — older than the source, rendering unstabilised"
+			say "      re-run 00-stabilise-detect.sh for $CLIP to refresh it"
+		else
+			# Worth saying out loud: this is the one decision in a dry run that costs ~65s per
+			# clip to get wrong, and it used to be made silently.
+			say "      no transform at $TRF — will render unstabilised"
+		fi
 	fi
 
+	FPS="$(source_fps "$SRC")"
 	say "$CLIP  post-CST YAVG=${YAVG}  gamma=${GAMMA}$([ "$GAMMA" != "$G_GAMMA_REF" ] && echo " (matched)")"
 	[ "$DRY" = "1" ] && continue
+
+	# The head of this graph is what makes the one-pass path one pass: CST, look LUT and tone LUT
+	# in a single decode, with the tone curve on the luma plane only (mergeplanes) so a per-channel
+	# contrast curve cannot turn saturated signage neon. Everything from the stabilisation warp
+	# onward is the shared delivery chain in lib.sh, which is where the measurements for each part
+	# of it live.
+	#
+	# `0:a:0?` MUST stay quoted: `?` is a glob character. bash only survives it unquoted because an
+	# unmatched glob passes through literally, so a file named `0:a:00` in the launch directory
+	# breaks it — and this path was the one place it was still bare.
+	# A numeric flag pair or nothing at all. Built as a plain string rather than an array because
+	# macOS ships bash 3.2, where expanding an EMPTY array under `set -u` raises "unbound
+	# variable" — the trap lib.sh's header documents.
+	LIMIT=""
+	[ -n "$PROOF" ] && LIMIT="-t $PROOF"
 
 	render() {  # render <w> <h> <suffix> [crop]
 		local w=$1 h=$2 suffix=$3 crop=${4:-}
 		local out="$OUT_DIR/${CLIP}_${suffix}.mp4"
-		ffmpeg -y -i "$SRC" -f lavfi -i "color=c=gray:s=$((w/2))x$((h/2)):r=24" -filter_complex \
-"[0:v]lut3d=file='${CST}':interp=tetrahedral${FIX},lut3d=file='${LOOK}':interp=tetrahedral,\
+		# A proof is named so it can never be mistaken for a deliverable in a folder listing.
+		[ -n "$PROOF" ] && out="$OUT_DIR/${CLIP}_${suffix}_proof-${PROOF}s.mp4"
+		# shellcheck disable=SC2086  # $LIMIT is a deliberate split: a numeric flag pair or nothing
+		render_delivery "$out" "$suffix encode" \
+			-y -i "$SRC" -f lavfi -i "$(grain_plate "$w" "$h" "$FPS")" -filter_complex \
+"[0:v]lut3d=file='${CST}':interp=tetrahedral,lut3d=file='${LOOK}':interp=tetrahedral,\
 format=yuv444p10le,split=2[a][b2];\
 [a]lut1d=file='${TONE}':interp=linear,format=yuv444p10le[t];\
-[t][b2]mergeplanes=0x001112:yuv444p10le,${SP},hue=s=${SAT},colorbalance=rm=${WARM}:bm=-${WARM},\
-${SFX}hqdn3d=0:5:0:6,${crop}zscale=w=${w}:h=${h}:f=lanczos:d=error_diffusion,format=yuv420p,\
-unsharp=5:5:0.4:5:5:0.0[b];\
-[1:v]noise=c0s=${GRAIN}:c0f=t,scale=${w}:${h}:flags=bilinear,format=yuv420p,${SP}[g];\
-[b][g]blend=all_mode=grainmerge:shortest=1[o]" \
-			-map "[o]" -map 0:a:0? \
+[t][b2]mergeplanes=0x001112:yuv444p10le,${DELIVERY_SETPARAMS},hue=s=${SAT},\
+colorbalance=rm=${WARM}:bm=-${WARM},$(delivery_image_chain "$w" "$h" "$SFX" "$crop")[b];\
+[1:v]$(delivery_grain_branch "$w" "$h" "$GRAIN_STRENGTH")[g];\
+[b][g]${DELIVERY_BLEND}[o]" \
+			-map "[o]" -map "0:a:0?" -shortest \
 			-c:v libx264 -profile:v high -preset slow -crf 18 \
 			-color_primaries bt709 -color_trc bt709 -colorspace bt709 \
-			-c:a aac -b:a 192k -movflags +faststart "$out" -v error
-		require_nonempty "$out" "$suffix encode"
-		safe_retag "$out" -movflags +faststart >/dev/null
+			-c:a aac -b:a 192k -movflags +faststart \
+			$LIMIT
 		say "      -> $(basename "$out")  $(( $(stat -f%z "$out") / 1048576 ))MB"
 	}
 

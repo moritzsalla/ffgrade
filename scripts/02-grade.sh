@@ -28,22 +28,28 @@ WORK="$(resolve_work_dir "$ROOT")"
 BASELINE="$WORK/dist/01-baseline/${CLIP}_baseline.mov"
 LUT="$ROOT/luts/looks/kodak_portra_400_nc.cube"
 TONE="$ROOT/luts/tone/shipped.cube"
-# Graded by eye in the Grade Bench (bench), calibrated live against the RAL references in
-# frame, then sent back through the artifact db. Deliberately off-spec: saturation 1.27 puts the
-# traffic blue at B/G 2.39 against a 1.98 spec. That is a grade, not an error — accuracy is the
-# reference you depart from on purpose. Regenerate shipped.cube with:
-#   ./make-tone-lut.py ../../luts/tone/shipped.cube --gamma 2.02 --pivot 0.39 --contrast 1.09 \
-#                      --toe 0.00 --shoulder 0.10 --black 0.025
-# (v2, after review: black point lifted 0.015 -> 0.025 and gamma eased 2.09 -> 2.02 to open
-#  shadow detail. `toe` was measured to do NOTHING at pivot 0.39 — identical percentiles at 0.07
-#  and 0.00 — so it is zeroed rather than left as a decorative knob. The black point is the live
-#  shadow control here.)
+# Graded by eye in the Grade Bench (bench/), calibrated live against the RAL references in frame,
+# then sent back through the artifact db. Deliberately off-spec: saturation 1.27 puts the traffic
+# blue at B/G 2.39 against a 1.98 spec. That is a grade, not an error — accuracy is the reference
+# you depart from on purpose.
+#
+# THE NUMBERS ARE NOT HERE. They live in look.json, and ensure_tone_lut below regenerates
+# shipped.cube from it whenever the two disagree. This header used to carry its own copy of all six
+# tone values plus a regenerate command whose path pointed outside the repo — two copies of a look,
+# which is the drift look.json exists to end.
+#
+# Worth keeping from that copy: `toe` was measured to do NOTHING at pivot 0.39 — identical
+# percentiles at 0.07 and 0.00 — so it is zeroed rather than left as a decorative knob. The black
+# point is the live shadow control here.
 SAT="$(look .colour.saturation)"
 WARM="$(look .colour.warmth)"
 OUT="$WORK/dist/02-graded/${CLIP}_graded.mov"
 
 [ -f "$BASELINE" ] || { echo "baseline not found: $BASELINE — run 01-baseline.sh first" >&2; exit 1; }
 check_disk_space "$WORK/dist" 10
+# Create the output directory rather than relying on the checked-in dist/*/.gitkeep
+# markers: with a work dir set, those live in the repo and the output does not.
+mkdir -p "$(dirname "$OUT")"
 ensure_tone_lut "$ROOT"
 
 ffmpeg -y -i "$BASELINE" \
