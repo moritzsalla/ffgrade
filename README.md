@@ -1,178 +1,144 @@
 # ffgrade
 
-Grading tool to grade iPhone ProRes \* Apple log footage. Gets the absolute best image quality out of iPhone footage that is possible to achieve.
+Grading tool for iPhone ProRes / Apple Log footage. Gets about as much image quality out of iPhone
+footage as the format actually holds. Final LUT is designed to look like Kodak Portra but can be
+tweaked.
 
-**Apple Log → graded Rec.709 in one ffmpeg pass.** 10-bit preserved to delivery, tone curve applied
-to luma only, LUTs generated rather than guessed. No NLE.
+Why? To make iPhones a viable device to shoot professionally on, easily.
 
-A personal tool. I shoot on an iPhone in ProRes / Apple Log for Instagram, and wanted the footage
-to look like it was graded rather than like phone video. The obvious route is DaVinci Resolve
-Studio — $295, because the free edition dropped Python scripting in 21.1 and I wanted this
-automated, not clicked. That is a lot for something I was mostly curious about, so I found out how
-far ffmpeg alone would get.
+Why this form factor? I don't know DaVinci Resolve, and I'm not willing to pay $295 for Resolve
+Studio — which is what you need, because the free edition dropped Python scripting in 21.1 and I
+wanted this automated, not clicked. This is purpose made and runs in one pass.
 
-Quite far, it turns out. Log holds roughly 3.6 stops of highlight headroom above diffuse white,
+How? **Apple Log → graded Rec.709 in one ffmpeg pass.** 10-bit preserved to delivery, tone curve
+applied to luma only, LUTs generated rather than guessed. No NLE.
+
+Does it work? Very well. Log holds roughly 3.6 stops of highlight headroom above diffuse white,
 10-bit 4:2:2, and none of the HDR tone mapping or sharpening a normal phone capture bakes in.
 Getting that out of it is a tone problem, and tone is something ffmpeg can do properly.
 
+## Usage
+
+```sh
+# drop clips in src/, then:
+./scripts/grade.sh src/                  # whole folder → dist/03-final/
+./scripts/grade.sh src/IMG_0609.mov      # one clip
+
+FEED=1 ./scripts/grade.sh src/           # also emit the 4:5 Feed crop
+STAB=0 ./scripts/grade.sh src/           # skip stabilisation, faster
+DRY=1  ./scripts/grade.sh src/           # plan only, render nothing
 ```
-./scripts/grade.sh ~/Movies/my-shoot        # folder in, finals out
-```
+
+Roughly 3 minutes per clip. Output lands in `dist/03-final/`, a per-run report in `dist/reports/`.
+
+## Before touching anything
+
+- **`src/` is read-only.** Everything generated goes to `dist/`.
+- **Read `docs/PIPELINE.md`** before changing the render chain. It records what was tried and
+  failed, with measurements — most of the filter choices look arbitrary until you see why the
+  obvious alternative was rejected.
+- **Run `./scripts/check.sh`** after touching anything in `scripts/`.
+- **Orientation is the source's problem.** Clips must already play the right way up; the pipeline
+  refuses anything that isn't portrait rather than squashing it.
+
+## Tweaking the final pass LUT
 
 ![The Grade Bench](docs/grade-bench.png)
 
-_The Grade Bench: set the look by eye at interactive speed, with the calibration references reading
-live beside the sliders. Its curve maths is a port of the renderer's, and a test asserts they stay
-in step — if the preview stops predicting the render, something says so before the footage does._
+The Bench is a browser tool for setting the look by eye. Export a frame, drop it in, drag sliders,
+and the image updates instantly — no render round-trip. The calibration readouts sit beside the
+sliders so you can see when a change pushes a known colour off its spec.
 
-## Scope, honestly
+When it looks right, hit **Send grade** and the settings come back as `look.json`, which is the
+single source every stage reads. Change that file and the tone LUT regenerates itself on the next
+run, so the `.cube` can never disagree with the numbers describing it.
+
+The Bench's curve maths is a port of the renderer's. `tests/curve-parity.py` runs both over the
+same inputs and fails if they diverge — otherwise the preview could quietly stop predicting the
+render and nothing would say so.
+
+## Caveats
 
 Built for my footage, my machine, my deliverables. macOS on Intel, bash 3.2, ffmpeg from
 `~/.local/bin`. Output is hardcoded to Instagram's two shapes. The look is one I like; yours will
 differ, which is what `look.json` and the Bench are for.
 
-It is not a product and there is no roadmap. It is shared because the measurements in
-`docs/PIPELINE.md` were expensive to get and might save someone else the same afternoon — including
-the several places I was confidently wrong and only the numbers caught it.
-
-## Things I got wrong, and what the measurements said
-
-The findings that cost the most time, each reproducible from `docs/PIPELINE.md`:
-
-- **`eq` silently negotiates an 8-bit pixel format.** No warning. Any chain using it has quietly
-  stopped being a 10-bit pipeline. Banned here; alternatives documented.
-- **A per-channel contrast curve wrecks saturated colour.** It crushes the two low channels harder
-  than the high one, which is what turns traffic signage neon. `mergeplanes` applies the curve to
-  luma only and leaves chroma alone.
-- **`format=yuv420p` and `-sws_dither ed` are byte-identical** — i.e. neither dithers. Only
-  `zscale` actually does the 10→8 bit reduction properly.
-- **Per-pixel grain does not survive delivery.** Re-encoded at ~4 Mbps the compressor smears it
-  into blobs. Grain generated at half resolution keeps its structure _and_ encodes ~22% cheaper.
-- **The free film-emulation LUTs are all 13³ grids** supplying colour character and almost no
-  contrast. The tone stage exists because of that, not despite it.
-- **I spent hours "fixing" colour that was already correct.** Apple's CST lands the standardised
-  traffic blue at B/G 1.99 against a 1.98 spec with nothing applied. The image looked flat because
-  it sat ~25% too bright with nothing reaching black. Tone, not colour.
+**It is not a product and there is no roadmap.**
 
 Deliverables per clip: **Reels/Stories** (9:16, 1080×1920) and **Feed** (4:5, 1080×1350).
 
 Reference footage throughout the docs is a 19-clip set shot on an iPhone 15 Pro in the Final Cut
 Camera app: ProRes 422 HQ, Apple Log, 4K24, locked white balance and focus.
 
-## How it works
+## How it works, exactly
 
-**Shoot as raw as the phone allows, decide the look later.** ProRes 422 HQ / Apple Log, 4K24,
-locked white balance and focus. Log looks flat and wrong straight out of the camera — that is the
-point: it keeps the range instead of spending it on Apple's decisions. An "unedited" iPhone photo
-is in fact heavily processed; Log hands that processing back as a choice.
+One ffmpeg invocation per clip, source to deliverable. In order:
 
-**Then fix tone, and mostly leave colour alone** (see above — this took me a while to accept).
+1. **Apple Log → Rec.709** via Apple's own 65³ conversion LUT. The transfer function is
+   proprietary, so this is a lookup, not a curve anyone can derive.
+2. **Look LUT** — Kodak Portra emulation. Supplies colour character and almost no contrast.
+3. **Tone curve**, generated from `look.json`, applied to the **luma plane only**. The original
+   chroma is merged back untouched, which is what stops a contrast curve turning saturated colour
+   neon.
+4. **Saturation and warmth**, also from `look.json`.
+5. **Stabilisation**, if a `.trf` exists for the clip, applied at full resolution before the
+   downscale so the warp resamples at 4K.
+6. **Chroma-only denoise** — removes fringing on high-contrast edges that saturation amplifies.
+7. **Downscale to 1080p** with Lanczos, dithered on the 10→8 bit reduction.
+8. **Sharpen**, then **grain**, in that order. Grain is generated at half resolution and blended,
+   so it survives Instagram's re-encode instead of being smeared into blobs.
+9. **H.264 encode**, then a remux pass that stamps and verifies the Rec.709 tags — encoders don't
+   reliably write them, and a wrongly tagged file gets double-transformed by any player that
+   trusts the tag.
 
-**Calibrating against colours that are legally defined** is how the arguments got settled. Not the
-point of the tool, but the reason I trust its numbers.
+Exposure is matched per clip against a reference before the tone curve, so a shoot grades
+consistently without hand-tuning each file.
 
-|                                                     |                                                    |
-| --------------------------------------------------- | -------------------------------------------------- |
-| ![Traffic signs](docs/reference-traffic-signs.png)  | ![Licence plate](docs/reference-licence-plate.png) |
-| Dutch traffic signage — RAL 3020 red, RAL 5017 blue | Dutch plate yellow — RAL 1021                      |
-
-The frame gets sampled at objects with published specs — plate yellow (RAL 1021), traffic red
-(RAL 3020), traffic blue (RAL 5017) — plus any neutral surface. That turns "does this look right"
-into a number, which is what caught the contrast curve quietly turning signage neon, and several
-judgements I'd made by eye and got wrong.
-
-![Grade ladder](docs/grade-ladder-variants.png)
-
-_A strength ladder: one frame at four points along a single parameter. Every decision in
-`docs/PIPELINE.md` was settled like this — the comparison and the measurement together._
-
-**Accuracy is not a grade, though.** The references tell you where you are, not where to go. The
-look I ship is deliberately off-spec — saturation 1.27 puts the blue at 2.39 against a 1.98 spec.
-That is the grade, not an error. The point of the readouts is to make the departure visible and
-chosen, not to stop it.
-
-## How the work splits
-
-Measurement and rendering are automated; the look is mine to decide. The two meet in
-**`bench/`** — a browser tool (published as an Artifact) with real-time sliders over the
-actual frame, live readouts of every RAL reference beside them, and a button that sends the chosen
-settings straight back to Claude. One grading session replaces a round trip per adjustment, and the numbers transfer to the pipeline verbatim because the tool's curve maths is a port of
-`make-tone-lut.py`.
+The staged scripts (`01-baseline` → `02-grade` → `03-final-*`) do the same work in separate passes,
+writing ProRes intermediates. They exist for re-tuning a look without redoing the conversion. Since
+the look is settled, `grade.sh` skips them — measured 2.3× faster with no intermediates written.
 
 ## Layout
 
-Source and inputs at the top level; `dist/` is only ever things a render wrote, and is
-reconstructible from `src/` plus the scripts.
-
-**Footage goes in `src/`, output comes out of `dist/`.** No configuration, no paths to edit —
-clone, drop clips in, run. Both are gitignored, along with every video extension, so a shoot can
-sit in the working tree without any risk of being committed.
-
-If you would rather keep footage on another volume, `src/` and `dist/` resolve through
-`$GRADE_WORK_DIR` or a one-line `.workdir` file at the repo root. Neither is needed by default.
-
 ```
-src/            Original camera files. NEVER modified or moved.
-scripts/        The pipeline itself. Stage scripts + LUT generators. Start at lib.sh.
-bench/          The Grade Bench: source of truth for the browser tool (published copy is an
-                Artifact). Named for the tool, not the folder — in this trade a grader is a person.
+src/            Drop footage here. Read-only, gitignored.
+dist/           Everything generated. Gitignored.
+  01-baseline/    staged pipeline only: after the Log→Rec.709 conversion
+  02-graded/      staged pipeline only: the ProRes master
+  03-final/       deliverables
+  proofs/         cheap fast renders for judging a look before committing to a full render
+  ladders/        side-by-side comparison stills
+  stab/           camera-motion transforms, per clip
+  reports/        what each run did
+scripts/        The pipeline. Start at lib.sh.
+bench/          The Grade Bench (published as a browser tool).
 luts/
-  apple/          Apple's official Log→Rec709 and Log→Lin LUTs (free Apple ID download).
-  looks/          Film-emulation look LUTs. See SOURCE.txt for provenance.
-  tone/           shipped.cube — the one tone curve that ships.
-    variants/     The 14 candidates the search passed through. Kept as evidence, not in use.
-  filmic/         Output of the rejected log→linear→filmic route. See ADR-0002.
-dist/            Generated. Safe to delete and re-render; nothing here is a source.
-  01-baseline/    Log→Rec.709, rotation fixed, correct tags. No creative decisions.
-  02-graded/      + look + tone + sat. The ProRes master; re-export from here, never from an MP4.
-  03-final/       Delivery MP4s, named for their deliverable.
-  proofs/         Cheap fast renders for sign-off before committing to a slow full render.
-  stab/           Camera-motion transforms (.trf), per clip. Motion-only, so they survive a re-grade.
-docs/
-  PIPELINE.md       Every finding, measurement, dead end and mistake. The real documentation.
-  BATCH_RUNBOOK.md  Per-clip procedure, how to run a grading session, what must NOT be batched.
-  SHOOTING_NOTES.md Capture-side lessons — what to change on the next shoot, before the grade.
-  HOW_TO_SHOOT.md   The camera settings, in plain language for whoever is holding the phone.
-  BACKLOG.md        Everything raised and not finished, and what was declined and why.
-  adr/              The decisions that would otherwise get "fixed" by a later reader.
-tests/            bats suite over the safety layer. Run via scripts/check.sh.
-CONTEXT.md        The project's own vocabulary, one term per concept, and the words ruled out.
+  apple/          Apple's conversion LUTs — NOT committed, see SOURCE.txt to fetch them
+  looks/          film-emulation LUTs (MIT)
+  tone/           shipped.cube, generated from look.json
+look.json       The look. One source, every stage reads it.
+docs/           PIPELINE.md is the real documentation.
+tests/          bats suite + the curve parity check.
+CONTEXT.md      What each word means here.
 ```
-
-## Before touching anything
-
-- **Read `docs/PIPELINE.md`.** It records not just what works but what was tried and failed, with
-  measurements — including two bugs in the safety scripts themselves, an ffmpeg filter that
-  silently drops the pipeline to 8-bit, and a "fix" that made the image measurably worse.
-- **Read `CONTEXT.md`** if you are going to write anything down. Several of these words mean two
-  things in ordinary speech and exactly one here — _look_ is not _tone_ is not _grade_, _spec_ is
-  not _target_, and a _baseline_ is not a _master_. Some file and variable names still carry the
-  ruled-out word; CONTEXT.md says which.
-- **Run stages through `scripts/`,** not by hand. They carry exit-code checks, tag
-  verification, disk-space checks and an orientation guard, each of which exists because its
-  absence already cost something.
-- **`src/` is read-only.** Every output goes to `dist/`.
-- **Run `./scripts/check.sh` after touching anything in `scripts/`.** It runs shellcheck and the
-  bats suite. Both, because neither catches what the other does: shellcheck reported ZERO issues
-  in scripts that contained two shipped, load-bearing bugs, while bats found both by running the
-  code on the real interpreter (macOS ships bash 3.2, whose empty-array handling under `set -u`
-  differs from every modern bash).
 
 ## Tests
 
-`tests/lib.bats` — 17 tests over the safety layer. Every one exists because the guard it covers
-either already failed in production or shipped broken and went unnoticed.
+I added some basic tests, mainly because running the pipeline is expensive and I didn't want to
+discover mid-conversion that a guard had broken.
 
-Two things about this suite worth knowing before extending it:
+Run everything with `./scripts/check.sh`:
 
-- **It has been mutation-tested.** Each guard was deliberately broken to confirm the matching test
-  goes red. That found two tests that passed against a _removed_ guard — pure theatre — both
-  because a synthetic fixture could not reproduce the condition (ffprobe repeats the video stream
-  only for files with the camera's stream-group structure; a generated fixture prints one line).
-  Those tests now use real footage from `src/` and skip if it is absent.
-- **One escaping mutation is correct, not a gap.** Removing `safe_retag`'s empty-output check
-  changes nothing observable — `mv` fails on its own and `set -e` aborts. The test there asserts
-  the property that matters (the original is never destroyed) rather than a message, and says so.
+- **shellcheck** across every script.
+- **`tests/curve-parity.py`** — the important one. Runs the Bench's JavaScript and the Python
+  generator over the same inputs and fails if they disagree by more than one 8-bit code value. If
+  these drift, the browser preview stops predicting the render and nothing else would catch it.
+- **`tests/lib.bats`** — 20 tests. Most cover the safety layer: colour-tag verification, the
+  portrait guard, disk-space checks, and that a failed remux never destroys the file it was fixing.
+  Three are smoke tests that just check the scripts start and run, which sounds trivial until the
+  whole suite passes green while four functions are missing and nothing can execute. That happened.
 
-Install: shellcheck as a prebuilt binary into `~/.local/bin`; bats via
-`git clone bats-core && ./install.sh ~/.local`. Neither via Homebrew, per this machine's rules.
+Every test exists because the thing it covers already broke, and two of the guards shipped broken
+and went unnoticed until something exercised them. The suite has been mutation-tested — each guard
+deliberately broken to confirm the matching test goes red — which is how I found two tests that
+passed against a removed guard and were doing nothing.

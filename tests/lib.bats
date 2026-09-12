@@ -229,3 +229,41 @@ setup() {
 	run probe_tags "$BATS_TEST_TMPDIR/q.mov"
 	[ "$output" = "bt709,bt709,bt709" ]
 }
+
+# --- smoke: the scripts must actually RUN -------------------------------------
+# These exist because the rest of this suite once passed in full while FOUR functions were missing
+# from lib.sh and every stage script died on the first line with "command not found". shellcheck
+# does not run the code, the parity check does not touch lib.sh, and the unit tests only call the
+# handful of functions they cover — so nothing noticed the pipeline was completely broken.
+#
+# A suite that cannot detect "the program does not start" is not a suite.
+
+@test "lib.sh defines every function the stage scripts call" {
+	source "$BATS_TEST_DIRNAME/../scripts/lib.sh"
+	for fn in probe_tags verify_bt709 safe_retag check_disk_space require_nonempty \
+	          require_portrait video_dim resolve_work_dir look ensure_tone_lut; do
+		run type -t "$fn"
+		[ "$output" = "function" ] || { echo "MISSING: $fn"; false; }
+	done
+}
+
+@test "every stage script starts and reports usage rather than dying" {
+	for s in 01-baseline 02-grade 03-final-reels 03-final-feed 00-stabilise-detect; do
+		run "$BATS_TEST_DIRNAME/../scripts/$s.sh" __NO_SUCH_CLIP__
+		# It must fail on the MISSING CLIP, not on a broken script.
+		[[ "$output" != *"command not found"* ]] || { echo "$s.sh: $output"; false; }
+		[[ "$output" != *"unbound variable"* ]]  || { echo "$s.sh: $output"; false; }
+		[[ "$output" == *"not found"* ]]         || { echo "$s.sh gave: $output"; false; }
+	done
+}
+
+@test "grade.sh plans a real clip end to end (dry run)" {
+	local work src
+	work=$(resolve_work_dir "$BATS_TEST_DIRNAME/.." 2>/dev/null) || work="$BATS_TEST_DIRNAME/.."
+	src=$(ls "$work"/src/*.mov 2>/dev/null | head -1)
+	[ -n "$src" ] || skip "no source footage"
+	DRY=1 run "$BATS_TEST_DIRNAME/../scripts/grade.sh" "$src"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"clip(s)"* ]]
+	[[ "$output" != *"command not found"* ]]
+}

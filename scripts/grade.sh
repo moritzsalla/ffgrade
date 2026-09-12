@@ -68,10 +68,10 @@ OK=0; SKIPPED=0
 for SRC in "${CLIPS[@]}"; do
 	CLIP="$(basename "${SRC%.*}")"
 
-	# Rotation is the source's business, not ours — see scripts/normalise-rotation.sh. Refuse a
-	# clip that would render sideways rather than producing a confidently wrong file.
+	# Orientation is the source's business. Refuse a clip that would render sideways rather than
+	# producing a confidently wrong file; require_portrait decodes a frame and measures it.
 	if ! require_portrait "$SRC" 2>/dev/null; then
-		say "SKIP  $CLIP — displays as $(display_dims "$SRC" | tr ' ' x), not portrait. Fix rotation first."
+		say "SKIP  $CLIP — not portrait. Fix the source orientation, then retry."
 		SKIPPED=$((SKIPPED+1)); continue
 	fi
 	FIX=""
@@ -110,7 +110,7 @@ print('%.3f' % max(1.2, min(3.2, g*math.log(r)/math.log(y))))")
 		[ -f "$TRF" ] && SFX="vidstabtransform=input='${TRF}':smoothing=${SMOOTHING}:optzoom=1:interpol=bicubic,unsharp=5:5:0.2:3:3:0.0,"
 	fi
 
-	say "$CLIP  rot=${ROT:-none}  post-CST YAVG=${YAVG}  gamma=${GAMMA}$([ "$GAMMA" != "$G_GAMMA_REF" ] && echo " (matched)")"
+	say "$CLIP  post-CST YAVG=${YAVG}  gamma=${GAMMA}$([ "$GAMMA" != "$G_GAMMA_REF" ] && echo " (matched)")"
 	[ "$DRY" = "1" ] && continue
 
 	render() {  # render <w> <h> <suffix> [crop]

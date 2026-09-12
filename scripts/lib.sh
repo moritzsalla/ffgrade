@@ -101,6 +101,61 @@ check_disk_space() {
 # So it decodes one frame and measures it, rather than reasoning about display matrices. ffmpeg
 # autorotates on decode, so this reflects what a viewer sees, and it does not care whether the
 # source was corrected by re-encoding or by fixing the matrix in Preview.
+# --- the look -----------------------------------------------------------------
+# One source for every look value: look.json at the repo root. Nothing else may hardcode one.
+# Before this existed, `SAT=1.27` was written out in two scripts and had already started to drift
+# in the obvious way — two copies, one edited.
+look() {  # look <jq-path> [fallback]
+	local key="$1" fallback="${2:-}" v
+	v=$(jq -r "$key // empty" "$LOOK_FILE" 2>/dev/null) || v=""
+	if [ -z "$v" ]; then
+		[ -n "$fallback" ] || { echo "look.json: missing $key and no fallback" >&2; return 1; }
+		v="$fallback"
+	fi
+	printf '%s\n' "$v"
+}
+
+# The shipped tone LUT is GENERATED from look.json's tone block. Regenerate whenever look.json is
+# newer, so the .cube can never silently disagree with the numbers that claim to describe it —
+# which is the same failure class as the Bench drifting from the renderer, one layer down.
+ensure_tone_lut() {
+	# Two lines, not one: bash expands the whole command line BEFORE `local` performs its
+	# assignments, so `local a="$1" b="$a"` sees an unset $a — and under `set -u` that aborts.
+	local root="$1"
+	local cube="$root/luts/tone/shipped.cube"
+	if [ -f "$cube" ] && [ "$cube" -nt "$LOOK_FILE" ]; then return 0; fi
+	echo "look.json is newer than shipped.cube — regenerating the tone curve"
+	"$root/scripts/make-tone-lut.py" "$cube" \
+		--gamma    "$(look .tone.gamma)"    --pivot  "$(look .tone.pivot)" \
+		--contrast "$(look .tone.contrast)" --toe    "$(look .tone.toe)" \
+		--shoulder "$(look .tone.shoulder)" --black  "$(look .tone.black)" >/dev/null
+}
+
+resolve_work_dir() {
+	local root="$1" w=""
+	if [ -n "${GRADE_WORK_DIR:-}" ]; then
+		w="$GRADE_WORK_DIR"
+	elif [ -f "$root/.workdir" ]; then
+		w=$(sed -e 's/[[:space:]]*$//' -e '/^[[:space:]]*#/d' "$root/.workdir" | head -1)
+		case "$w" in "~"*) w="$HOME${w#\~}";; esac
+	fi
+	[ -n "$w" ] || w="$root"
+	if [ ! -d "$w" ]; then
+		echo "work directory does not exist: $w" >&2
+		echo "  set GRADE_WORK_DIR, or put the path in $root/.workdir" >&2
+		return 1
+	fi
+	printf '%s\n' "$w"
+}
+
+# Reads one dimension field on its own. ffprobe appends a TRAILING COMMA on this camera's csv
+# output (`3840,2160,`), so splitting a combined string yields an empty height and any numeric
+# comparison fails open. Query fields individually and validate.
+video_dim() {  # video_dim <file> <width|height>
+	ffprobe -v error -select_streams v:0 -show_entries "stream=$2" \
+		-of default=nw=1:nk=1 "$1" 2>/dev/null | grep -E '^[0-9]+$' | head -1
+}
+
 require_portrait() {
 	local file="$1" tmp w h
 	tmp="$(mktemp -t portrait).png"
