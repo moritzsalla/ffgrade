@@ -1,21 +1,21 @@
 # ffgrade
 
-Grading tool for iPhone ProRes / Apple Log footage. Gets about as much image quality out of iPhone
-footage as the format actually holds. Final LUT is designed to look like Kodak Portra but can be
-tweaked.
+One stop grading tool for iPhone ProRes + AppleLog footage. **This is a personal use tool, not a product.**
 
-Why? To make iPhones a viable device to shoot professionally on, easily.
+**Why?** iPhone Pros 15th generation and newer are able to shoot in log which retains enough depth to edit professionally. Apple log preserves enough dynamic range, shadow detail, and color depth (10-bit) to be seamlessly edited alongside footage from professional cinema cameras.
 
-Why this form factor? I don't know DaVinci Resolve, and I'm not willing to pay $295 for Resolve
-Studio — which is what you need, because the free edition dropped Python scripting in 21.1 and I
-wanted this automated, not clicked. This is purpose made and runs in one pass.
+Getting there requires an understanding of color spaces, LUTs, and exposure, and often requires professional software. This tool gets about as much image quality out of iPhone footage as the format actually holds without opening any editing programs. The final LUT is designed to look like Kodak Portra but can be tweaked.
 
-How? **Apple Log → graded Rec.709 in one ffmpeg pass.** 10-bit preserved to delivery, tone curve
+**How?** **Apple Log → graded Rec.709 in one ffmpeg pass.** 10-bit preserved to delivery, tone curve
 applied to luma only, LUTs generated rather than guessed. No NLE.
 
-Does it work? Very well. Log holds roughly 3.6 stops of highlight headroom above diffuse white,
+**Does it work?** Very well. Log holds roughly 3.6 stops of highlight headroom above diffuse white,
 10-bit 4:2:2, and none of the HDR tone mapping or sharpening a normal phone capture bakes in.
 Getting that out of it is a tone problem, and tone is something ffmpeg can do properly.
+
+![Tone ladder](docs/grade-ladder-tone.png)
+
+![Workbench](docs/grade-bench.png)
 
 ## Usage
 
