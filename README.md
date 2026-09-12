@@ -1,12 +1,43 @@
-# ProRes Grading Pipeline
+# ffgrade
 
-A repeatable pipeline for turning iPhone ProRes / Apple Log footage into Instagram posts that look
-deliberately graded rather than like phone video — plus a browser workbench for setting the look
-by eye, calibrated against colours whose values are legally defined.
+**Apple Log → graded Rec.709 in one ffmpeg pass.** 10-bit preserved to delivery, tone curve applied
+to luma only, LUTs generated rather than guessed. No NLE.
 
-Deliverables per clip: **Reels/Stories** (9:16, 1080×1920) and **Feed** (4:5, 1080×1350).
+iPhone ProRes/Log holds far more than a phone edit gets out of it — roughly 3.6 stops of highlight
+headroom above diffuse white, 10-bit 4:2:2, and no baked-in HDR tone mapping or sharpening. The
+usual way to reach that is DaVinci Resolve Studio at $295 (the free edition dropped Python
+scripting in 21.1). This gets there with ffmpeg and a browser.
+
+```
+./scripts/grade.sh ~/Movies/my-shoot        # folder in, finals out
+```
 
 ![The Grade Bench](docs/grade-bench.png)
+
+*The Grade Bench: set the look by eye at interactive speed, with the calibration references reading
+live beside the sliders. Its curve maths is a port of the renderer's, and a test asserts they stay
+in step — if the preview stops predicting the render, CI says so rather than the footage.*
+
+## What it does that most ffmpeg grading scripts don't
+
+- **Keeps 10 bits all the way to delivery.** `eq` silently negotiates an 8-bit pixel format, which
+  no warning tells you about; it is banned here and the alternatives are documented.
+- **Applies the tone curve to luma only.** A per-channel contrast curve crushes a saturated
+  colour's two low channels harder than its high one, which is what turns traffic signage neon.
+  `mergeplanes` keeps chroma untouched.
+- **Dithers the 10→8 bit reduction.** `format=yuv420p` and `-sws_dither ed` are byte-identical —
+  i.e. no dithering at all. Only `zscale` actually does it.
+- **Generates its LUTs.** The tone curve comes from `look.json` via a generator, so the `.cube` can
+  never disagree with the numbers that claim to describe it. The free film-emulation LUTs are all
+  13³ grids that supply colour character and almost no contrast — the tone stage exists because of
+  that, not despite it.
+- **Grain that survives Instagram.** Per-pixel grain does not: re-encoded at ~4 Mbps the compressor
+  smears it into blobs. Clustered grain keeps its structure and encodes ~22% cheaper.
+
+Every one of those is a measurement in `docs/PIPELINE.md`, alongside the things that were tried and
+lost.
+
+Deliverables per clip: **Reels/Stories** (9:16, 1080×1920) and **Feed** (4:5, 1080×1350).
 
 The reference footage throughout this documentation is a 19-clip set shot on an iPhone 15 Pro in
 the Final Cut Camera app: ProRes 422 HQ, Apple Log, 4K24, locked white balance and focus.
@@ -26,7 +57,8 @@ looked flat because it sat ~25% too bright with nothing reaching black, and beca
 LUT supplies a print emulation, not a cinema tone response. Chasing colour was wasted effort;
 shaping tone was the whole fix.
 
-**Calibrate against things whose colour is legally defined.**
+**Tuning aid: calibrate against colours that are legally defined.** Not the point of the tool,
+but the thing that settled most of its arguments.
 
 | | |
 |---|---|
