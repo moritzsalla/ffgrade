@@ -911,3 +911,48 @@ JSON
 	[ "$status" -ne 0 ] || fail "no-argument run exited 0"
 	[ ! -d "$work/dist" ] || fail "a usage error created $(find "$work/dist" -type f | tr '\n' ' ')"
 }
+
+# --- the grade chain: one builder, two render paths ---------------------------
+# The look LUT, the luma-only tone curve and the colour ops were assembled separately by grade.sh
+# and 02-grade.sh. They had already drifted once before that (grade.sh carried its own copy of the
+# tone block, so a grade from the Bench moved the one-pass path and left the staged one behind),
+# and the suite renders only the one-pass graph — so the staged one could break and stay green.
+
+@test "the grade chain is built in exactly one place" {
+	# Structural, because the behavioural test below cannot see a THIRD caller appearing. The
+	# tell is mergeplanes: it is the one filter that only the grade head uses, so any stage script
+	# naming it has started building its own copy again.
+	local offenders
+	# Comments are excluded, or the pointers explaining the rule trip the rule.
+	offenders=$(grep -n 'mergeplanes' "$SCRIPTS"/*.sh \
+		| grep -v '/lib\.sh:' | grep -v ':[0-9]*:[[:space:]]*#' || true)
+	[ -z "$offenders" ] || fail "builds its own grade chain instead of calling grade_chain:$offenders"
+}
+
+@test "the staged grade graph initialises and renders" {
+	# 02-grade.sh's graph was executed by NOTHING. shellcheck cannot see inside a filter string,
+	# the parity check touches only the tone curve, and the one real render in this suite goes
+	# through grade.sh. So the staged path's half of the shared builder had no cover at all: the
+	# variant with no CST prefix and no setparams is a different graph, and it is the one that
+	# would fail on "Invalid argument" if the yuv444p10le pair were ever dropped.
+	#
+	# A SYNTHETIC baseline is legitimate here, unlike the ffprobe tests: what is under test is
+	# whether a filter graph initialises and produces pixels, which does not depend on this
+	# camera's stream structure. A baseline is by definition already Rec.709 ProRes.
+	local work="$BATS_TEST_TMPDIR/staged" base out
+	base="$work/dist/01-baseline/CCC_baseline.mov"
+	mkdir -p "$(dirname "$base")"
+	ffmpeg -y -f lavfi -i "testsrc2=s=240x426:d=0.2:r=24" \
+		-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le "$base.raw.mov" -v error
+	# Tagged in a separate remux, for the reason setup_file gives: prores_ks ignores the flags.
+	ffmpeg -y -i "$base.raw.mov" -map 0:v:0 -c copy \
+		-color_primaries bt709 -color_trc bt709 -colorspace bt709 "$base" -v error
+
+	GRADE_WORK_DIR="$work" run "$SCRIPTS/02-grade.sh" CCC
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	out="$work/dist/02-graded/CCC_graded.mov"
+	[ -s "$out" ] || fail "the staged graph produced nothing: $output"
+	# 10-bit all the way: a stray 8-bit negotiation is the silent failure this pipeline watches for.
+	run ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$out"
+	[[ "$output" == *"yuv422p10le"* ]] || fail "the graded master is not 10-bit: $output"
+}

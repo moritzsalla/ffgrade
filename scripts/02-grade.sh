@@ -7,11 +7,10 @@
 # ("milky"): nothing reaches black and the whole frame sits ~25% too high. shipped.cube fixes that.
 # Don't drop it thinking it's redundant — see docs/PIPELINE.md, "Tone shaping".
 #
-# WHY mergeplanes: the tone curve is applied to the LUMA PLANE ONLY, with the original chroma
-# merged back. A per-channel contrast curve crushes a saturated colour's two low channels harder
-# than its high one, which turns traffic signage neon — visible on the 30 km/h ring long before it
-# was measured. Luma-only gives identical tone with chroma untouched. `format=yuv444p10le` on both
-# branches is required; without it mergeplanes fails with a bare "Invalid argument".
+# The graph itself is grade_chain in lib.sh, shared with grade.sh so a look cannot move on one
+# path and not the other. Its header carries the reasoning — luma-only tone, and why both branches
+# must be yuv444p10le. This stage adds only the ProRes encode: no CST (stage 01 did it) and no
+# setparams (nothing downstream here negotiates a colourspace).
 #
 # The saturation and warmth below are a CREATIVE choice made by eye in the Grade Bench, not a
 # correction. Measured against the standardised colours in frame, the Apple CST's own colour is
@@ -28,7 +27,6 @@ CLIP="${1:-}"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
 BASELINE="$WORK/dist/01-baseline/${CLIP}_baseline.mov"
-LUT="$ROOT/luts/looks/kodak_portra_400_nc.cube"
 TONE="$ROOT/luts/tone/shipped.cube"
 # Graded by eye in the Grade Bench (bench/), calibrated live against the RAL references in frame,
 # then sent back through the artifact db. Deliberately off-spec: saturation 1.27 puts the traffic
@@ -55,9 +53,7 @@ mkdir -p "$(dirname "$OUT")"
 ensure_tone_lut "$ROOT"
 
 ffmpeg -y -i "$BASELINE" \
-	-filter_complex "[0:v]lut3d=file='${LUT}':interp=tetrahedral,format=yuv444p10le,split=2[a][b];\
-[a]lut1d=file='${TONE}':interp=linear,format=yuv444p10le[t];\
-[t][b]mergeplanes=0x001112:yuv444p10le,hue=s=${SAT},colorbalance=rm=${WARM}:bm=-${WARM}[o]" \
+	-filter_complex "[0:v]$(grade_chain "$TONE" "$SAT" "$WARM")[o]" \
 	-map "[o]" -map "0:a:0?" \
 	-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le \
 	-c:a copy \

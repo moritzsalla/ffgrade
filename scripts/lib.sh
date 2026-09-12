@@ -20,6 +20,11 @@ set -euo pipefail
 # Resolved relative to lib.sh itself, so every stage sees the same file regardless of cwd.
 LOOK_FILE="${LOOK_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/look.json}"
 
+# The look LUT is part of the grade, so it is named ONCE here rather than in each render path.
+# Both scripts used to carry their own copy of this path: two places to change a look, which is
+# exactly the drift look.json exists to end.
+LOOK_LUT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/luts/looks/kodak_portra_400_nc.cube"
+
 # ffprobe misreports these files two ways at once, and this function exists to survive both.
 #
 #   1. The video stream prints TWICE (once inside [STREAM_GROUP], once as a top-level [STREAM])
@@ -299,6 +304,37 @@ DELIVERY_CHROMA="hqdn3d=0:5:0:6,"
 # shellcheck disable=SC2034  # spliced into filter graphs by the stage scripts, not used here
 DELIVERY_BLEND="blend=all_mode=grainmerge:shortest=1"
 
+
+# THE GRADE ITSELF, as a spliceable filter chain: look LUT, tone curve, saturation, warmth. Both
+# render paths use it — the one-pass grade.sh and the staged 02-grade.sh — and they used to build
+# it separately. That had already drifted once (grade.sh carried its own copy of the tone block, so
+# a grade sent from the Bench moved one path and not the other), and NOTHING in the suite renders
+# the staged graph, so a second divergence would ship in silence. One builder, two callers, the
+# same reasoning as the delivery chain below.
+#
+# TONE ON THE LUMA PLANE ONLY. A per-channel contrast curve crushes a saturated colour's two low
+# channels harder than its high one, so saturated things get more saturated — the traffic signage
+# went visibly neon long before it was measured. Curving luma and merging the ORIGINAL chroma back
+# gives the same tone with colour untouched. `0x001112` = plane 0 from input 0 (the toned luma),
+# planes 1 and 2 from input 1. Measurements in docs/PIPELINE.md, "The fix: apply the tone curve to
+# LUMA ONLY"; the consequences are ADR 0003, including why the brick's lost saturation must NOT be
+# won back with a uniform boost.
+#
+# `format=yuv444p10le` ON BOTH BRANCHES is required, not decoration: mergeplanes needs matching
+# plane dimensions and 4:2:2 chroma is half width, so without it the graph dies on a bare
+# "Invalid argument" naming nothing.
+#
+# Internal labels are prefixed because callers splice this into a bigger graph and choose their
+# own — grade.sh already uses [b] for the image branch that continues from here.
+#
+# <head> and <tag> are prefixes carrying their own trailing comma, like delivery_image_chain's, so
+# that an absent one leaves no trace: head is the camera CST for the one-pass path (the staged path
+# applied it back in stage 01), and tag is DELIVERY_SETPARAMS wherever the result feeds filters
+# that negotiate a colourspace.
+grade_chain() {  # grade_chain <tone-lut> <sat> <warm> [head-prefix] [tag-prefix]
+	printf "%slut3d=file='%s':interp=tetrahedral,format=yuv444p10le,split=2[gc_y][gc_c];[gc_y]lut1d=file='%s':interp=linear,format=yuv444p10le[gc_t];[gc_t][gc_c]mergeplanes=0x001112:yuv444p10le,%shue=s=%s,colorbalance=rm=%s:bm=-%s" \
+		"${4:-}" "$LOOK_LUT" "$1" "${5:-}" "$2" "$3" "$3"
+}
 # The warp resamples BEFORE the downscale, so it happens at master resolution rather than at
 # delivery size. The trailing comma belongs to the prefix: callers splice the result directly into
 # a filter chain, and an absent transform must leave no trace.

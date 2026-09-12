@@ -42,7 +42,6 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
 
 CST="$ROOT/luts/apple/AppleLogToRec709-v1.0.cube"
-LOOK="$ROOT/luts/looks/kodak_portra_400_nc.cube"
 PROOF="${PROOF:-}"        # PROOF=<seconds> renders a short proof; see the note below
 # Proofs are not deliverables and must never land where someone uploads from.
 if [ -n "$PROOF" ]; then
@@ -181,11 +180,10 @@ for SRC in "${CLIPS[@]}"; do
 	"$SCRIPT_DIR/make-tone-lut.py" "$TONE" --gamma "$GAMMA" --pivot "$G_PIVOT" \
 		--contrast "$G_CONTRAST" --toe "$G_TOE" --shoulder "$G_SHOULDER" --black "$G_BLACK" >/dev/null
 
-	# The head of this graph is what makes the one-pass path one pass: CST, look LUT and tone LUT
-	# in a single decode, with the tone curve on the luma plane only (mergeplanes) so a per-channel
-	# contrast curve cannot turn saturated signage neon. Everything from the stabilisation warp
-	# onward is the shared delivery chain in lib.sh, which is where the measurements for each part
-	# of it live.
+	# What makes this path ONE pass is the head: the CST is spliced into grade_chain rather than
+	# spent on its own decode, so conversion, look and tone all happen in the single graph below.
+	# Everything else — the grade, then the stabilisation warp onward — is shared with the staged
+	# path and lives in lib.sh, which is where the measurements for each part of it live.
 	#
 	# `0:a:0?` MUST stay quoted: `?` is a glob character. bash only survives it unquoted because an
 	# unmatched glob passes through literally, so a file named `0:a:00` in the launch directory
@@ -204,11 +202,9 @@ for SRC in "${CLIPS[@]}"; do
 		# shellcheck disable=SC2086  # $LIMIT is a deliberate split: a numeric flag pair or nothing
 		render_delivery "$out" "$suffix encode" \
 			-y -i "$SRC" -f lavfi -i "$(grain_plate "$w" "$h" "$FPS")" -filter_complex \
-"[0:v]lut3d=file='${CST}':interp=tetrahedral,lut3d=file='${LOOK}':interp=tetrahedral,\
-format=yuv444p10le,split=2[a][b2];\
-[a]lut1d=file='${TONE}':interp=linear,format=yuv444p10le[t];\
-[t][b2]mergeplanes=0x001112:yuv444p10le,${DELIVERY_SETPARAMS},hue=s=${SAT},\
-colorbalance=rm=${WARM}:bm=-${WARM},$(delivery_image_chain "$w" "$h" "$SFX" "$crop")[b];\
+"[0:v]$(grade_chain "$TONE" "$SAT" "$WARM" \
+  "lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},"),\
+$(delivery_image_chain "$w" "$h" "$SFX" "$crop")[b];\
 [1:v]$(delivery_grain_branch "$w" "$h" "$GRAIN_STRENGTH")[g];\
 [b][g]${DELIVERY_BLEND}[o]" \
 			-map "[o]" -map "0:a:0?" -shortest \
