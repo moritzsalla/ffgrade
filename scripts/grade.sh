@@ -35,11 +35,11 @@ OUT_DIR="$WORK/dist/03-final"
 WORK="$WORK/dist/.grade-work"
 
 # --- the frozen look. Change these only to change the look for every clip, everywhere. ---
-SAT="1.27"; WARM="0.005"
+SAT="$(look .colour.saturation)"; WARM="$(look .colour.warmth)"
 G_PIVOT="0.39"; G_CONTRAST="1.09"; G_TOE="0.00"; G_SHOULDER="0.10"; G_BLACK="0.025"
 G_GAMMA_REF="2.02"          # gamma the look was tuned at...
 Y_REF="609"                 # ...against this post-CST mean (10-bit), measured on IMG_0609
-GRAIN="${GRAIN:-8}"; SMOOTHING="${SMOOTHING:-30}"
+GRAIN="${GRAIN:-$(look .grain.strength)}"; SMOOTHING="${SMOOTHING:-$(look .stabilisation.smoothing)}"
 STAB="${STAB:-1}"; FEED="${FEED:-0}"; MATCH="${MATCH:-1}"; DRY="${DRY:-0}"
 SP="setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=limited"
 

@@ -17,6 +17,9 @@
 
 set -euo pipefail
 
+# Resolved relative to lib.sh itself, so every stage sees the same file regardless of cwd.
+LOOK_FILE="${LOOK_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/look.json}"
+
 # ffprobe reports the video stream TWICE on these files (once inside [STREAM_GROUP], once as a
 # top-level [STREAM]) plus a blank separator line — so this reads the first non-empty line rather
 # than comparing the whole multi-line output against one expected value. An earlier version of
@@ -114,6 +117,36 @@ require_portrait() {
 # Resolution order: $GRADE_WORK_DIR, then a `.workdir` file at the repo root (gitignored, one
 # path, no quotes), then the repo itself — so a self-contained checkout with src/ and dist/ inside
 # it still works with no configuration at all.
+# --- the look -----------------------------------------------------------------
+# One source for every look value: look.json at the repo root. Nothing else may hardcode one.
+# Before this existed, `SAT=1.27` was written out in two scripts and had already started to drift
+# in the obvious way — two copies, one edited.
+look() {  # look <jq-path> [fallback]
+	local key="$1" fallback="${2:-}" v
+	v=$(jq -r "$key // empty" "$LOOK_FILE" 2>/dev/null) || v=""
+	if [ -z "$v" ]; then
+		[ -n "$fallback" ] || { echo "look.json: missing $key and no fallback" >&2; return 1; }
+		v="$fallback"
+	fi
+	printf '%s\n' "$v"
+}
+
+# The shipped tone LUT is GENERATED from look.json's tone block. Regenerate whenever look.json is
+# newer, so the .cube can never silently disagree with the numbers that claim to describe it —
+# which is the same failure class as the Bench drifting from the renderer, one layer down.
+ensure_tone_lut() {
+	# Two lines, not one: bash expands the whole command line BEFORE `local` performs its
+	# assignments, so `local a="$1" b="$a"` sees an unset $a — and under `set -u` that aborts.
+	local root="$1"
+	local cube="$root/luts/tone/shipped.cube"
+	if [ -f "$cube" ] && [ "$cube" -nt "$LOOK_FILE" ]; then return 0; fi
+	echo "look.json is newer than shipped.cube — regenerating the tone curve"
+	"$root/scripts/make-tone-lut.py" "$cube" \
+		--gamma    "$(look .tone.gamma)"    --pivot  "$(look .tone.pivot)" \
+		--contrast "$(look .tone.contrast)" --toe    "$(look .tone.toe)" \
+		--shoulder "$(look .tone.shoulder)" --black  "$(look .tone.black)" >/dev/null
+}
+
 resolve_work_dir() {
 	local root="$1" w=""
 	if [ -n "${GRADE_WORK_DIR:-}" ]; then

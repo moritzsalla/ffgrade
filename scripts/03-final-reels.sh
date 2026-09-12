@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 CLIP="$1"
-SMOOTHING="${SMOOTHING:-30}"   # frames of camera-path lowpass; higher = closer to locked-off
+SMOOTHING="${SMOOTHING:-$(look .stabilisation.smoothing)}"   # frames of camera-path lowpass; higher = closer to locked-off
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
 IN="$WORK/dist/02-graded/${CLIP}_graded.mov"
@@ -88,7 +88,7 @@ CHROMA="hqdn3d=0:5:0:6,"
 # propagates "unknown" backwards and the zscale on the IMAGE branch then fails with
 # "code 3074: no path between colorspaces", pointing at a filter that is not the problem.
 # Every filter here was bisected individually and all passed; only the pair fails.
-GRAIN_STRENGTH="${GRAIN_STRENGTH:-8}"
+GRAIN_STRENGTH="${GRAIN_STRENGTH:-$(look .grain.strength)}"
 FPS=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 "$IN" | head -1)
 [ -n "$FPS" ] || FPS="24"
 

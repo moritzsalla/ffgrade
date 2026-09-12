@@ -176,9 +176,9 @@
           <span class="status" id="status">connecting…</span>
         </div>
         <details>
-          <summary>Settings being sent</summary>
+          <summary>look.json being sent</summary>
           <pre id="out"></pre>
-          <div class="row"><button class="btn" id="copy">Copy instead</button></div>
+          <div class="row"><button class="btn" id="copy">Copy look.json</button></div>
         </details>
       </div>
     </aside>
@@ -440,16 +440,17 @@
   COLOUR.forEach(function (c) { slider(document.getElementById("colour"), c); });
 
   function writeOut() {
-    var cmd = "./make-tone-lut.py tone.cube \\\n" +
-      "  --gamma <b>" + P.gamma.toFixed(2) + "</b> --pivot <b>" + P.pivot.toFixed(2) +
-      "</b> --contrast <b>" + P.contrast.toFixed(2) + "</b> \\\n" +
-      "  --toe <b>" + P.toe.toFixed(2) + "</b> --shoulder <b>" + P.shoulder.toFixed(2) +
-      "</b> --black <b>" + P.black.toFixed(3) + "</b>";
-    var extra = [];
-    if (P.sat !== 1) extra.push("hue=s=" + P.sat.toFixed(2));
-    if (P.warm !== 0) extra.push("colorbalance=rm=" + P.warm.toFixed(3) + ":bm=" + (-P.warm).toFixed(3));
-    if (extra.length) cmd += "\n\n# after mergeplanes:\n# " + extra.join(",");
-    document.getElementById("out").innerHTML = cmd;
+    // Emit look.json verbatim — the pipeline's single source for the look. A grade sent from here
+    // is copied into the repo's look.json as-is, so there is no translation step to get wrong.
+    var look = {
+      tone: {
+        gamma: +P.gamma.toFixed(3), pivot: +P.pivot.toFixed(3),
+        contrast: +P.contrast.toFixed(3), toe: +P.toe.toFixed(3),
+        shoulder: +P.shoulder.toFixed(3), black: +P.black.toFixed(4)
+      },
+      colour: { saturation: +P.sat.toFixed(3), warmth: +P.warm.toFixed(4) }
+    };
+    document.getElementById("out").textContent = JSON.stringify(look, null, 2);
   }
 
   function loadImage(srcUrl, name) {
@@ -549,6 +550,7 @@
     db.doc("grades/" + id).set({
       clip: clipName,
       params: JSON.parse(JSON.stringify(P)),
+      look: JSON.parse(document.getElementById("out").textContent),
       readings: readings,
       note: document.getElementById("note").value || "",
       at: new Date().toISOString()

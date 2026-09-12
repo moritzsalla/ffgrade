@@ -38,12 +38,13 @@ TONE="$ROOT/luts/tone/shipped.cube"
 #  shadow detail. `toe` was measured to do NOTHING at pivot 0.39 — identical percentiles at 0.07
 #  and 0.00 — so it is zeroed rather than left as a decorative knob. The black point is the live
 #  shadow control here.)
-SAT="1.27"
-WARM="0.005"
+SAT="$(look .colour.saturation)"
+WARM="$(look .colour.warmth)"
 OUT="$WORK/dist/02-graded/${CLIP}_graded.mov"
 
 [ -f "$BASELINE" ] || { echo "baseline not found: $BASELINE — run 01-baseline.sh first" >&2; exit 1; }
-check_disk_space "$ROOT/dist" 10
+check_disk_space "$WORK/dist" 10
+ensure_tone_lut "$ROOT"
 
 ffmpeg -y -i "$BASELINE" \
 	-filter_complex "[0:v]lut3d=file='${LUT}':interp=tetrahedral,format=yuv444p10le,split=2[a][b];\
