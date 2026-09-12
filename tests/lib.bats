@@ -52,6 +52,13 @@ setup() {
 	source "$SCRIPTS/lib.sh"
 }
 
+# Mean luma of the first frame, 10-bit scale. `metadata=print` logs at INFO, so -v error would
+# suppress the only output that matters — the same trap grade.sh's exposure probe hit.
+_yavg() {  # _yavg <file>
+	ffmpeg -v info -i "$1" -frames:v 1 -vf signalstats,metadata=print:file=- -f null - 2>/dev/null \
+		| sed -n 's/.*lavfi\.signalstats\.YAVG=//p' | head -1
+}
+
 # ASSERTION FORM MATTERS HERE. bats 1.14 does NOT fail a test on a bare `[[ ]]` that returns false
 # in the middle of a test body: `[[` is a shell keyword, and the mechanism bats uses to spot a
 # failure only tracks simple commands, so the false result is discarded and the test's verdict
@@ -932,9 +939,15 @@ JSON
 @test "the staged grade graph initialises and renders" {
 	# 02-grade.sh's graph was executed by NOTHING. shellcheck cannot see inside a filter string,
 	# the parity check touches only the tone curve, and the one real render in this suite goes
-	# through grade.sh. So the staged path's half of the shared builder had no cover at all: the
-	# variant with no CST prefix and no setparams is a different graph, and it is the one that
-	# would fail on "Invalid argument" if the yuv444p10le pair were ever dropped.
+	# through grade.sh. So the staged path's half of the shared builder had no cover at all, and
+	# it IS a different graph: no CST prefix, no setparams.
+	#
+	# WHAT THIS DOES AND DOES NOT CATCH. Mutation-tested: breaking the mergeplanes mask fails it.
+	# Dropping either `format=yuv444p10le` does NOT — not here and not in the real-footage render
+	# either. The "Invalid argument" that pair was added for is not reproducible on ffmpeg 9.0.1,
+	# which negotiates both branches to a matching format on its own. Do not read that as licence
+	# to delete them: the failure is documented from a real incident, negotiation is exactly the
+	# kind of thing that changes between builds, and nothing would tell you it had come back.
 	#
 	# A SYNTHETIC baseline is legitimate here, unlike the ffprobe tests: what is under test is
 	# whether a filter graph initialises and produces pixels, which does not depend on this
@@ -952,7 +965,28 @@ JSON
 	[ "$status" -eq 0 ] || { echo "$output"; false; }
 	out="$work/dist/02-graded/CCC_graded.mov"
 	[ -s "$out" ] || fail "the staged graph produced nothing: $output"
-	# 10-bit all the way: a stray 8-bit negotiation is the silent failure this pipeline watches for.
-	run ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$out"
-	[[ "$output" == *"yuv422p10le"* ]] || fail "the graded master is not 10-bit: $output"
+	# THE TONE CURVE MUST BE LOAD-BEARING, and proving that took three attempts — each earlier
+	# one passed against a mutation it was written to catch:
+	#   1. `pix_fmt is 10-bit` is vacuous. `-pix_fmt yuv422p10le` on the command line decides the
+	#      answer whatever the graph did, so it passed against a chain mutated to emit 8-bit.
+	#   2. `luma moved from the baseline` is nearly vacuous. colorbalance shifts luma too, so a
+	#      mergeplanes mask taking the UNTONED branch still moved it — baseline 493.92, bypassed
+	#      647.998, real chain 552.71 — and passed.
+	#      (Bypassing it means 0x101112, not 0x011112: each byte of the mask is INPUT then PLANE,
+	#      so 01 asks for input 0's chroma as luma, which is a different corruption that moves
+	#      luma too. A mutation that is not the one you meant proves nothing.)
+	# Rendering the same baseline through the same builder with an IDENTITY tone LUT and requiring
+	# the two to differ pins the curve itself, and stays true whatever look.json currently says.
+	local ident="$BATS_TEST_TMPDIR/identity.cube" flat="$work/flat.mov"
+	"$SCRIPTS/make-tone-lut.py" "$ident" --gamma 1 --pivot 0.5 --contrast 1 \
+		--toe 0 --shoulder 0 --black 0 >/dev/null
+	ffmpeg -y -i "$base" \
+		-filter_complex "[0:v]$(grade_chain "$ident" "$(look .colour.saturation)" "$(look .colour.warmth)")[o]" \
+		-map "[o]" -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le "$flat" -v error
+	local y_graded y_flat
+	y_graded=$(_yavg "$out")
+	y_flat=$(_yavg "$flat")
+	[ -n "$y_graded" ] && [ -n "$y_flat" ] || fail "could not measure luma: '$y_graded' '$y_flat'"
+	[ "$y_graded" != "$y_flat" ] \
+		|| fail "the tone LUT changed nothing ($y_graded either way): the curve is not reaching the output"
 }
