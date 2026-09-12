@@ -990,3 +990,22 @@ JSON
 	[ "$y_graded" != "$y_flat" ] \
 		|| fail "the tone LUT changed nothing ($y_graded either way): the curve is not reaching the output"
 }
+
+@test "every file path named in prose or in a script actually exists" {
+	# Removing rotation left a runbook step telling you to pass an argument that had been silently
+	# dropped, and CLAUDE.md's own rule is that deleting a concept means grepping for its name in
+	# prose too. A pointer to a moved or deleted file is the same failure one level up, and it is
+	# the failure mode a docs layout built on pointers invites — so it gets a guard rather than a
+	# convention.
+	local root="$BATS_TEST_DIRNAME/.." missing="" ref f
+	# Paths that look like repo paths: a directory prefix this repo actually has, then a filename.
+	for ref in $(grep -rhoE '(docs|scripts|tests|luts|bench)/[A-Za-z0-9_/.-]+\.(md|sh|py|json|cube|html)' \
+			"$root"/*.md "$root"/docs "$root"/scripts "$root"/tests 2>/dev/null | sort -u); do
+		f="${ref%%[.,)]}"
+		# luts/apple/ is deliberately absent on a fresh clone (Apple's licence), and the filmic
+		# cubes are generated and gitignored. Both document their own absence in a SOURCE.txt.
+		case "$f" in luts/apple/*|luts/filmic/*) continue ;; esac
+		[ -e "$root/$f" ] || missing="$missing $f"
+	done
+	[ -z "$missing" ] || fail "referenced but not present:$missing"
+}

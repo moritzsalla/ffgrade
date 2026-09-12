@@ -24,58 +24,40 @@ scripts that contained two shipped, load-bearing bugs. bats found both, because 
 the real interpreter — macOS ships **bash 3.2**, whose handling of empty arrays under `set -u`
 differs from every modern bash. Run both.
 
-## Filter findings that look arbitrary until you know why
+## Filter rules, and where the reason lives
 
-Each of these is measured; the numbers are in `docs/PIPELINE.md`. They are the reason the render
-chain looks the way it does, and each one was a silent failure — no error, just wrong output.
+Each was a silent failure — no error, just wrong output — and each is measured. The rule is here so
+you don't trip it; the measurement is in `docs/PIPELINE.md`, which is the only place it belongs.
 
-- **`eq` silently negotiates an 8-bit pixel format.** ffmpeg auto-inserts a scaler
-  (`yuv422p10le → yuv422p`) with no warning, so any chain using it has quietly stopped being a
-  10-bit pipeline. Banned. Verify any new filter with `-v debug | grep "picking yuv"`.
-- **`colorlevels` produces a flat frame** on this input. Not investigated; `curves` works.
-- **A per-channel contrast curve wrecks saturated colour.** It crushes the two low channels harder
-  than the high one, which turns traffic signage neon. The tone curve is applied to the **luma
-  plane only** via `mergeplanes=0x001112`, chroma merged back untouched. `format=yuv444p10le` is
-  required on both branches or mergeplanes fails with a bare "Invalid argument".
-- **`format=yuv420p` and `-sws_dither ed` are byte-identical** — i.e. neither dithers at all. Only
-  `zscale` does the 10→8 bit reduction properly.
-- **`curves` interpolates with a cubic spline, not straight lines.** More than ~3 control points
-  with uneven slope overshoots past identity somewhere you didn't intend. A 5-point shadow
-  correction once made the image *brighter* than the uncorrected version. Measure the result;
-  don't trust the control points.
-- **Per-pixel grain does not survive delivery.** Re-encoded at ~4 Mbps the compressor smears it
-  into blobs (lag-1 autocorrelation 0.00 → 0.39). Grain generated at half resolution and blended
-  keeps its structure *and* encodes ~22% cheaper. Apply it **after** the sharpener; before it, the
-  sharpener rings the grain and weakens it.
-- **An untagged branch poisons the whole filter graph.** ffmpeg negotiates formats across the
-  entire graph, so a `lavfi` source with no colour metadata propagates "unknown" backwards and a
-  `zscale` several filters upstream fails with `code 3074: no path between colorspaces`. Tag
-  synthesised branches with `setparams`. `mergeplanes` output is untagged the same way.
-- **`blend` needs `shortest=1`.** `-shortest` is not a substitute with `filter_complex`: an
-  infinite `lavfi` source will drive the encode forever and the output grows without bound.
-- **Encoders don't reliably stamp colour tags.** Both `prores_ks` and `libx264` ignored
-  `-color_primaries`/`-color_trc`/`-colorspace` here. A wrongly tagged file is double-transformed
-  by any player that trusts the tag — this is what "bleached out" was. Always verify after an
-  encode and fix with a `-c copy` remux.
+- **`eq` is banned.** It silently negotiates an 8-bit format, so the chain quietly stops being
+  10-bit. Check any new filter with `-v debug | grep "picking yuv"`.
+- **`colorlevels` produces a flat frame** on this input. Use `curves`.
+- **Only `zscale` dithers** the 10→8 bit reduction. `format=yuv420p` and `-sws_dither ed` are
+  byte-identical, i.e. neither does anything.
+- **`curves` interpolates with a cubic spline.** Past ~3 uneven control points it overshoots
+  somewhere you didn't intend. Measure the result, don't trust the control points.
+- **Tag every synthesised branch with `setparams`.** An untagged `lavfi` source propagates
+  "unknown" backwards and fails a `zscale` several filters upstream. `mergeplanes` output is
+  untagged the same way.
+- **Grain goes after the sharpener, at half resolution.** Before it, the sharpener rings it.
+- **`blend` needs `shortest=1`;** `-shortest` is not a substitute under `filter_complex`. The
+  reasoning is in `lib.sh`, above `DELIVERY_BLEND`.
+- **Verify colour tags after every encode.** `prores_ks` and `libx264` both ignored the flags here,
+  and a wrongly tagged file is double-transformed by any player that trusts it. `safe_retag`.
 
 ## ffprobe misreports this camera's files in three ways
 
-All silent, all cost real time. The files carry a `[STREAM_GROUP]` structure that ordinary idioms
-don't expect.
+All silent, all cost real time, all caused by a `[STREAM_GROUP]` structure ordinary idioms don't
+expect. The measurements and the shipped bugs each one caused are in `docs/PIPELINE.md`.
 
-1. **The video stream prints twice**, plus a blank line. Comparing that to one expected value always
-   fails — this is how `verify_bt709` shipped in a state where it could never pass.
-2. **`-select_streams a:0` returns nothing** despite audio being present. A silence check written
-   the obvious way reports every clip silent. `-map 0:a:0?` for ffmpeg is unaffected — different
-   code path.
-3. **A trailing comma** on csv output (`3840,2160,`), so `${dims##*,}` is empty and a numeric
-   comparison fails open. This is how the portrait guard shipped accepting landscape clips — and
-   how `probe_tags` returned `bt709,bt709,bt709,` and made `verify_bt709` unable to pass on a
-   camera-structured file no matter how it was tagged. Both are fixed by querying one field at a
-   time; the comma appears on camera originals and on `-c copy` excerpts of them, but not on the
-   pipeline's own re-encodes, so it hides until real footage reaches it.
+1. **The video stream prints twice**, plus a blank line.
+2. **`-select_streams a:0` returns nothing** despite audio being present. `-map 0:a:0?` for ffmpeg
+   is a different code path and is unaffected.
+3. **csv output carries a trailing comma** (`3840,2160,`), so a field split fails open. It appears
+   on camera originals and `-c copy` excerpts of them, never on the pipeline's own re-encodes, so
+   it hides until real footage reaches it.
 
-Query fields individually with `-of default=nw=1:nk=1` and validate with a regex. Never trust a
+Query one field at a time with `-of default=nw=1:nk=1` and validate with a regex. Never trust a
 single-line ffprobe answer without checking what it actually printed.
 
 ## Testing rules
@@ -120,10 +102,11 @@ single-line ffprobe answer without checking what it actually printed.
   into its `TITLE` and `make-tone-lut.py` skips the write when they already match. mtime cannot
   work: git does not preserve it, so on a fresh clone the committed cube always lands newer than
   `look.json` and would be trusted forever.
-- **The delivery chain lives once, in `lib.sh`.** Stabilisation warp, chroma denoise, crop, the
-  10→8 bit reduction, sharpener and grain blend were three copies (two stage-3 scripts plus
-  `grade.sh`) and had drifted three ways. The two stage-3 scripts are now one `03-final.sh`
-  parameterised by target. The measurements that justify each filter live next to the builder.
+- **The grade chain and the delivery chain live once each, in `lib.sh`.** Both were copies that
+  drifted: the delivery filters were three (two stage-3 scripts, now one `03-final.sh`
+  parameterised by target, plus `grade.sh`), and the grade head was two, with nothing in the suite
+  rendering the staged one. A test now fails if a stage script starts building either again. The
+  measurements that justify each filter live next to its builder.
 - **Never point `ffmpeg -y` at a delivery path.** It truncates the existing file before it knows
   whether the graph initialises, so a failed re-render destroys the approved deliverable — measured
   at 0 bytes with ffmpeg exiting 234. Use `render_delivery`, which stages, checks and tags before
