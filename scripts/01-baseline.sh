@@ -1,11 +1,21 @@
 #!/bin/bash
 # Stage 1: source -> baseline (Log->Rec709 CST, correct color tags, optional rotation fix).
 # Usage: ./01-baseline.sh IMG_XXXX [ROTATE_FIX]
-#   ROTATE_FIX: "none" (default) — trust ffmpeg's autorotate against the file's own display
-#               matrix, which is correct for most clips — or "180" if a preview check shows the
-#               autorotated result is upside down anyway (seen once, on IMG_0609; NOT assumed to
-#               apply to every clip — see docs/PIPELINE.md and BATCH_RUNBOOK.md).
-# DO NOT default this to "180" in a batch loop — confirm per clip with a preview frame first.
+#   ROTATE_FIX:
+#     none  (default) trust ffmpeg's autorotate against the file's own display matrix
+#     cw    rotate 90 clockwise — for clips stored WITHOUT a rotation matrix
+#     ccw   rotate 90 counter-clockwise
+#     180   flip, when autorotate lands upside down (seen on the one +90 clip)
+#
+# The rotation CLASS is readable from the file, so this does not need eyeballing per clip:
+#   matrix -90  -> autorotate is correct, use "none"
+#   matrix +90  -> autorotate lands upside down, use "180"
+#   NO matrix   -> the file is portrait content stored as landscape with the flag missing
+#                  entirely. ffmpeg has nothing to autorotate by, so it stays sideways. Use "cw".
+#
+# That last class was originally mistaken for "landscape footage" and treated as a framing problem
+# needing a crop decision. It is not: the content is portrait, the flag is just absent. Confirmed
+# by rendering five of them.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -31,12 +41,13 @@ OUT="$WORK/dist/01-baseline/${CLIP}_baseline.mov"
 check_disk_space "$ROOT/dist" 10
 
 FILTER="lut3d=file='${LUT}':interp=tetrahedral"
-if [ "$ROTATE_FIX" = "180" ]; then
-	FILTER="${FILTER},vflip,hflip"
-elif [ "$ROTATE_FIX" != "none" ]; then
-	echo "unknown ROTATE_FIX '$ROTATE_FIX' — use 'none' or '180'" >&2
-	exit 1
-fi
+case "$ROTATE_FIX" in
+	none) ;;
+	cw)   FILTER="${FILTER},transpose=1" ;;
+	ccw)  FILTER="${FILTER},transpose=2" ;;
+	180)  FILTER="${FILTER},vflip,hflip" ;;
+	*)    echo "unknown ROTATE_FIX '$ROTATE_FIX' — use none, cw, ccw or 180" >&2; exit 1 ;;
+esac
 
 ffmpeg -y -i "$SRC" -vf "$FILTER" \
 	-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le \

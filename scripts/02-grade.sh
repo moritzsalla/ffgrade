@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stage 2: baseline -> graded master (Portra look + tone shaping + the chosen look).
+# Stage 2: baseline -> graded master (look LUT + tone curve + colour, i.e. the whole grade).
 # Usage: ./02-grade.sh IMG_XXXX
 # Reads dist/01-baseline/<clip>_baseline.mov, writes dist/02-graded/<clip>_graded.mov.
 #

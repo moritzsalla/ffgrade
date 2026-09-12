@@ -94,6 +94,20 @@ check_disk_space() {
 # A vertical delivery script handed a landscape master will happily scale 3840x2160 into
 # 1080x1920 — no error, no warning, just a badly squashed file that looks "done". That is the
 # dangerous failure in a batch run, so refuse it here instead.
+# Reads the rotation class off the file, so nobody has to eyeball nineteen clips. Prints the
+# ROTATE_FIX value 01-baseline.sh should be given.
+rotation_class() {
+	local rot
+	rot=$(ffprobe -v error -select_streams v:0 -show_entries stream_side_data=rotation \
+		-of csv=p=0 "$1" 2>/dev/null | grep -v '^[[:space:]]*$' | head -1)
+	case "${rot:-none}" in
+		-90)  printf 'none\n' ;;   # autorotate handles it
+		90)   printf '180\n'  ;;   # autorotate lands upside down
+		none) printf 'cw\n'   ;;   # no matrix at all: portrait stored as landscape
+		*)    printf 'none\n' ;;
+	esac
+}
+
 require_portrait() {
 	local file="$1"
 	local dims w h

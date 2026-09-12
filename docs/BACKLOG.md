@@ -4,14 +4,6 @@ Everything raised and not finished. Ordered by what blocks what, not by size.
 
 ## Blocking the rest of the shoot
 
-**Decide what happens to the 11 landscape clips.** Of 19, eleven have no rotation matrix and
-present as 3840×2160. A 9:16 deliverable cannot take them without discarding roughly two thirds
-of the frame width. The options are centre-crop, pillarbox (solid or blurred), or route them to a
-landscape/4:5 cut instead. This is a framing decision, not a technical one, and nothing else about
-the remaining clips can proceed until it is made. The export scripts currently refuse them with a
-stated reason rather than silently squashing them — see `docs/BATCH_RUNBOOK.md`, "Mixed
-orientation".
-
 **Sign off the v4 look.** The current proof carries four changes on top of the approved grade:
 black point lifted 0.015 → 0.025 with gamma eased 2.09 → 2.02 (shadow detail), stabilisation,
 chroma-only denoise for the sign shimmer, and clustered grain moved after the sharpener. Until
@@ -20,6 +12,22 @@ that is judged, the other 18 clips should not be rendered against it.
 **Run the remaining 18 clips.** Per-clip procedure in `docs/BATCH_RUNBOOK.md`. Two things there
 are per-clip and must not be inherited from IMG_0609: the Feed crop offset (750 is this clip's
 composition only) and the rotation class.
+
+## Resolved
+
+**The "11 landscape clips" were never landscape.** They are portrait shots stored as 3840×2160
+with the rotation flag **missing entirely** — ffmpeg has nothing to autorotate by, so they stay
+sideways, and the sideways frame reads as a landscape composition. Rendering one made it obvious
+immediately; it had been reasoned about as a framing problem for far too long without anyone
+looking at a frame.
+
+They need `transpose=1`, not a crop. No footage is discarded and no creative decision is required.
+Confirmed on five of them. `rotation_class` in `scripts/lib.sh` now reads the class straight off
+the file, so the whole shoot classifies in one pass:
+
+    matrix -90  -> none   (autorotate is correct)     7 clips
+    matrix +90  -> 180    (autorotate lands upside down)  1 clip
+    no matrix   -> cw     (portrait stored as landscape)  11 clips
 
 ## Worth doing next
 

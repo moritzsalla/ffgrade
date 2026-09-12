@@ -32,6 +32,8 @@ WORK="$(resolve_work_dir "$ROOT")"
 CST="$ROOT/luts/apple/AppleLogToRec709-v1.0.cube"
 LOOK="$ROOT/luts/looks/kodak_portra_400_nc.cube"
 OUT_DIR="$WORK/dist/03-final"
+# Reports are not deliverables — keep them out of the folder someone uploads from.
+REPORT_DIR="$WORK/dist/reports"
 WORK="$WORK/dist/.grade-work"
 
 # --- the frozen look. Change these only to change the look for every clip, everywhere. ---
@@ -43,8 +45,8 @@ GRAIN="${GRAIN:-$(look .grain.strength)}"; SMOOTHING="${SMOOTHING:-$(look .stabi
 STAB="${STAB:-1}"; FEED="${FEED:-0}"; MATCH="${MATCH:-1}"; DRY="${DRY:-0}"
 SP="setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=limited"
 
-mkdir -p "$OUT_DIR" "$WORK"
-REPORT="$OUT_DIR/run-$(date +%Y%m%d-%H%M%S).txt"
+mkdir -p "$OUT_DIR" "$REPORT_DIR" "$WORK"
+REPORT="$REPORT_DIR/run-$(date +%Y%m%d-%H%M%S).txt"
 : > "$REPORT"
 say() { echo "$*" | tee -a "$REPORT"; }
 

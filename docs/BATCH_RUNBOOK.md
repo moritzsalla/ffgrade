@@ -73,35 +73,29 @@ one.
 fine gradients look slightly rougher than the 10-bit render; and objects in shade read darker and
 less saturated than their RAL spec, so the references are hue and ratio guides, not exposure ones.
 
-## Mixed orientation — read before batching anything
+## Mixed orientation — three classes, read off the file
 
-This shoot is **not** uniformly vertical. Measured across all 19 clips:
+This shoot is not uniformly tagged, but the classes are machine-readable, so this is three checks
+rather than nineteen eyeball passes. `rotation_class` in `scripts/lib.sh` prints the right
+`ROTATE_FIX` for any clip:
 
-| Rotation matrix | Clips | Presents as |
-|---|---|---|
-| none | IMG_0607, 0608, 0610–0618 (**11**) | 3840×2160 **landscape** |
-| −90° | IMG_0619–0625 (**7**) | 2160×3840 portrait |
-| +90° | IMG_0609 (**1**) | 2160×3840 portrait |
+| Rotation matrix | ROTATE_FIX | Clips | What is going on |
+|---|---|---|---|
+| −90° | `none` | IMG_0619–0625 (7) | autorotate already correct |
+| +90° | `180` | IMG_0609 (1) | autorotate lands it upside down |
+| **absent** | `cw` | IMG_0607, 0608, 0610–0618 (11) | portrait content stored as landscape with no flag |
 
-Consequences, both verified:
+**The third class was misread for a long time as "landscape footage".** With no matrix, ffmpeg has
+nothing to rotate by, so the frame stays sideways — and a sideways portrait frame looks exactly
+like a landscape composition in a file listing. It was treated as a framing problem needing a crop
+decision, and it blocked the rest of the shoot. It is not: the content is portrait and the flag is
+simply missing. `transpose=1` fixes it, nothing is discarded, and no creative call is needed.
 
-- `03-final-feed.sh` on a landscape master → hard error (cropping 2700px from a 2160px-tall frame).
-- `03-final-reels.sh` on a landscape master → **silently succeeded**, squashing 3840×2160 into
-  1080×1920. No error, no warning, badly distorted output. In a batch run that produces a pile of
-  broken files that all look "done" — the worst failure mode here.
+The lesson is the cheap one: render a frame before reasoning about geometry. One `ffmpeg` call
+would have settled it at the start.
 
-Both scripts now call `require_portrait` and refuse a landscape input rather than guessing.
-
-**The 11 landscape clips need a framing decision that hasn't been made yet**: centre-crop to
-vertical (discards ~⅔ of the frame width), pillarbox with blurred/solid bars, or exclude them
-from the vertical deliverables and use them for a landscape/4:5 cut instead. That is a creative
-call, not a technical one.
-
-**Useful corollary:** IMG_0609 is the *only* +90 clip, which is why it alone needed the
-`vflip,hflip` fix. The 7 portrait clips are −90 and are a different case. Rotation behaviour can
-therefore be keyed off the matrix value — **3 checks, one per rotation class**, rather than 19
-individual eyeball passes. Confirm one clip from each class, then apply that class's setting to
-its members.
+The `require_portrait` guard in the export stages still earns its place — it catches a genuinely
+landscape master reaching a vertical deliverable, which would otherwise be squashed silently.
 
 ## What's safe to batch, what isn't
 

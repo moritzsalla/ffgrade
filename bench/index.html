@@ -199,19 +199,19 @@
 
   var SAMPLERS = [
     { key: "plate", name: "Plate yellow", ral: "RAL 1021", swatch: "#f3c300", unit: "G/R",
-      target: 0.80, tol: 0.08, max: 1.2,
+      spec: 0.80, tol: 0.08, max: 1.2,
       pick: function (p) { return (p[0] + p[1]) / 2 - p[2]; }, frac: 0.3,
       calc: function (c) { return c[0] ? c[1] / c[0] : 0; }, def: [46, 1029] },
     { key: "red", name: "Traffic red", ral: "RAL 3020", swatch: "#cc0605", unit: "purity",
-      target: 0.36, tol: 0.07, max: 0.8,
+      spec: 0.36, tol: 0.07, max: 0.8,
       pick: function (p) { return p[0] - (p[1] + p[2]) / 2; }, frac: 0.2,
       calc: function (c) { return c[0] ? (c[1] + c[2]) / 2 / c[0] : 0; }, def: [255, 843] },
     { key: "blue", name: "Traffic blue", ral: "RAL 5017", swatch: "#063971", unit: "B/G",
-      target: 1.98, tol: 0.12, max: 3.4,
+      spec: 1.98, tol: 0.12, max: 3.4,
       pick: function (p) { return p[2] - (p[0] + p[1]) / 2; }, frac: 0.2,
       calc: function (c) { return c[1] ? c[2] / c[1] : 0; }, def: [255, 782] },
     { key: "grey", name: "Neutral", ral: "R−B ≈ 0", swatch: "#8b8f96", unit: "R−B",
-      target: 0, tol: 4, max: 40,
+      spec: 0, tol: 4, max: 40,
       pick: null, frac: 1,
       calc: function (c) { return c[0] - c[2]; }, def: [405, 1300] }
   ];
@@ -356,7 +356,7 @@
       if (!e) return;
       if (!p) { e.v.textContent = "—"; e.v.className = "val v-none"; e.b.style.width = "0"; return; }
       var v = s.calc(avgTop(around(img, p), s.pick, s.frac));
-      var off = Math.abs(v - s.target);
+      var off = Math.abs(v - s.spec);
       var cls = off <= s.tol ? "ok" : (off <= s.tol * 2.2 ? "warn" : "off");
       e.v.textContent = v.toFixed(2);
       e.v.className = "val v-" + cls;
@@ -378,7 +378,7 @@
       row.className = "scope";
       row.innerHTML = '<span class="chip" style="background:' + s.swatch + '"></span>' +
         '<span class="name" role="button" tabindex="0" data-key="' + s.key + '">' + s.name + '</span>' +
-        '<span class="val">—</span><span class="spec">' + s.unit + ' ' + s.target + '</span>' +
+        '<span class="val">—</span><span class="spec">' + s.unit + ' ' + s.spec + '</span>' +
         '<span class="bar"><i></i></span>';
       host.appendChild(row);
       els[s.key] = { v: row.querySelector(".val"), b: row.querySelector(".bar i"),
