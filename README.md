@@ -3,10 +3,15 @@
 **Apple Log → graded Rec.709 in one ffmpeg pass.** 10-bit preserved to delivery, tone curve applied
 to luma only, LUTs generated rather than guessed. No NLE.
 
-iPhone ProRes/Log holds far more than a phone edit gets out of it — roughly 3.6 stops of highlight
-headroom above diffuse white, 10-bit 4:2:2, and no baked-in HDR tone mapping or sharpening. The
-usual way to reach that is DaVinci Resolve Studio at $295 (the free edition dropped Python
-scripting in 21.1). This gets there with ffmpeg and a browser.
+A personal tool. I shoot on an iPhone in ProRes / Apple Log for Instagram, and wanted the footage
+to look like it was graded rather than like phone video. The obvious route is DaVinci Resolve
+Studio — $295, because the free edition dropped Python scripting in 21.1 and I wanted this
+automated, not clicked. That is a lot for something I was mostly curious about, so I found out how
+far ffmpeg alone would get.
+
+Quite far, it turns out. Log holds roughly 3.6 stops of highlight headroom above diffuse white,
+10-bit 4:2:2, and none of the HDR tone mapping or sharpening a normal phone capture bakes in.
+Getting that out of it is a tone problem, and tone is something ffmpeg can do properly.
 
 ```
 ./scripts/grade.sh ~/Movies/my-shoot        # folder in, finals out
@@ -16,73 +21,77 @@ scripting in 21.1). This gets there with ffmpeg and a browser.
 
 *The Grade Bench: set the look by eye at interactive speed, with the calibration references reading
 live beside the sliders. Its curve maths is a port of the renderer's, and a test asserts they stay
-in step — if the preview stops predicting the render, CI says so rather than the footage.*
+in step — if the preview stops predicting the render, something says so before the footage does.*
 
-## What it does that most ffmpeg grading scripts don't
+## Scope, honestly
 
-- **Keeps 10 bits all the way to delivery.** `eq` silently negotiates an 8-bit pixel format, which
-  no warning tells you about; it is banned here and the alternatives are documented.
-- **Applies the tone curve to luma only.** A per-channel contrast curve crushes a saturated
-  colour's two low channels harder than its high one, which is what turns traffic signage neon.
-  `mergeplanes` keeps chroma untouched.
-- **Dithers the 10→8 bit reduction.** `format=yuv420p` and `-sws_dither ed` are byte-identical —
-  i.e. no dithering at all. Only `zscale` actually does it.
-- **Generates its LUTs.** The tone curve comes from `look.json` via a generator, so the `.cube` can
-  never disagree with the numbers that claim to describe it. The free film-emulation LUTs are all
-  13³ grids that supply colour character and almost no contrast — the tone stage exists because of
-  that, not despite it.
-- **Grain that survives Instagram.** Per-pixel grain does not: re-encoded at ~4 Mbps the compressor
-  smears it into blobs. Clustered grain keeps its structure and encodes ~22% cheaper.
+Built for my footage, my machine, my deliverables. macOS on Intel, bash 3.2, ffmpeg from
+`~/.local/bin`. Output is hardcoded to Instagram's two shapes. The look is one I like; yours will
+differ, which is what `look.json` and the Bench are for.
 
-Every one of those is a measurement in `docs/PIPELINE.md`, alongside the things that were tried and
-lost.
+It is not a product and there is no roadmap. It is shared because the measurements in
+`docs/PIPELINE.md` were expensive to get and might save someone else the same afternoon — including
+the several places I was confidently wrong and only the numbers caught it.
+
+## Things I got wrong, and what the measurements said
+
+The findings that cost the most time, each reproducible from `docs/PIPELINE.md`:
+
+- **`eq` silently negotiates an 8-bit pixel format.** No warning. Any chain using it has quietly
+  stopped being a 10-bit pipeline. Banned here; alternatives documented.
+- **A per-channel contrast curve wrecks saturated colour.** It crushes the two low channels harder
+  than the high one, which is what turns traffic signage neon. `mergeplanes` applies the curve to
+  luma only and leaves chroma alone.
+- **`format=yuv420p` and `-sws_dither ed` are byte-identical** — i.e. neither dithers. Only
+  `zscale` actually does the 10→8 bit reduction properly.
+- **Per-pixel grain does not survive delivery.** Re-encoded at ~4 Mbps the compressor smears it
+  into blobs. Grain generated at half resolution keeps its structure *and* encodes ~22% cheaper.
+- **The free film-emulation LUTs are all 13³ grids** supplying colour character and almost no
+  contrast. The tone stage exists because of that, not despite it.
+- **I spent hours "fixing" colour that was already correct.** Apple's CST lands the standardised
+  traffic blue at B/G 1.99 against a 1.98 spec with nothing applied. The image looked flat because
+  it sat ~25% too bright with nothing reaching black. Tone, not colour.
 
 Deliverables per clip: **Reels/Stories** (9:16, 1080×1920) and **Feed** (4:5, 1080×1350).
 
-The reference footage throughout this documentation is a 19-clip set shot on an iPhone 15 Pro in
-the Final Cut Camera app: ProRes 422 HQ, Apple Log, 4K24, locked white balance and focus.
+Reference footage throughout the docs is a 19-clip set shot on an iPhone 15 Pro in the Final Cut
+Camera app: ProRes 422 HQ, Apple Log, 4K24, locked white balance and focus.
 
-## Why it's built this way
+## How it works
 
 **Shoot as raw as the phone allows, decide the look later.** ProRes 422 HQ / Apple Log, 4K24,
-locked white balance and focus. Log footage looks flat and wrong straight out of the camera — that
-is the point: it preserves range to grade with instead of baking in Apple's decisions. An
-"unedited" iPhone photo is in fact heavily processed (HDR tone mapping, local contrast, saturation,
-sharpening); log gives that processing back to us as a choice.
+locked white balance and focus. Log looks flat and wrong straight out of the camera — that is the
+point: it keeps the range instead of spending it on Apple's decisions. An "unedited" iPhone photo
+is in fact heavily processed; Log hands that processing back as a choice.
 
-**The work is tone, not colour.** The single most useful finding here. Apple's own Log→Rec.709 LUT
-is already colorimetrically accurate — verified against standardised colours physically in frame,
-it lands the traffic-blue sign at B/G 1.99 against a 1.98 spec with nothing applied. The footage
-looked flat because it sat ~25% too bright with nothing reaching black, and because a stills film
-LUT supplies a print emulation, not a cinema tone response. Chasing colour was wasted effort;
-shaping tone was the whole fix.
+**Then fix tone, and mostly leave colour alone** (see above — this took me a while to accept).
 
-**Tuning aid: calibrate against colours that are legally defined.** Not the point of the tool,
-but the thing that settled most of its arguments.
+**Calibrating against colours that are legally defined** is how the arguments got settled. Not the
+point of the tool, but the reason I trust its numbers.
 
 | | |
 |---|---|
 | ![Traffic signs](docs/reference-traffic-signs.png) | ![Licence plate](docs/reference-licence-plate.png) |
 | Dutch traffic signage — RAL 3020 red, RAL 5017 blue | Dutch plate yellow — RAL 1021 |
 
-Rather than grade purely by eye, the
-frame is sampled at objects with published specs — Dutch licence-plate yellow (RAL 1021), traffic
-red (RAL 3020), traffic blue (RAL 5017) — plus a neutral surface. That converts "does this look
-right" into a measurement. It catches the failure mode where a contrast curve quietly turns signage
-neon, and it caught several confident-but-wrong judgements made by eye during development.
+The frame gets sampled at objects with published specs — plate yellow (RAL 1021), traffic red
+(RAL 3020), traffic blue (RAL 5017) — plus any neutral surface. That turns "does this look right"
+into a number, which is what caught the contrast curve quietly turning signage neon, and several
+judgements I'd made by eye and got wrong.
 
 ![Grade ladder](docs/grade-ladder-variants.png)
 
-*A strength ladder: the same frame at four points along one parameter. Comparisons like this are
-how every decision in `docs/PIPELINE.md` was settled — the numbers beside them, not instead.*
+*A strength ladder: one frame at four points along a single parameter. Every decision in
+`docs/PIPELINE.md` was settled like this — the comparison and the measurement together.*
 
-**But accuracy is not a grade.** The references say where you are, not where to go. The shipped
-look deliberately sits off-spec (saturation 1.27 puts the blue at 2.39). That is intent, not error.
-The tooling exists to make the departure _visible and chosen_, not to prevent it.
+**Accuracy is not a grade, though.** The references tell you where you are, not where to go. The
+look I ship is deliberately off-spec — saturation 1.27 puts the blue at 2.39 against a 1.98 spec.
+That is the grade, not an error. The point of the readouts is to make the departure visible and
+chosen, not to stop it.
 
 ## How the work splits
 
-Measurement and rendering are automated; the look is a human call. The two meet in
+Measurement and rendering are automated; the look is mine to decide. The two meet in
 **`bench/`** — a browser tool (published as an Artifact) with real-time sliders over the
 actual frame, live readouts of every RAL reference beside them, and a button that sends the chosen
 settings straight back to Claude. One grading session replaces a round trip per adjustment, and the numbers transfer to the pipeline verbatim because the tool's curve maths is a port of
