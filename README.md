@@ -61,6 +61,12 @@ settings straight back to Claude. One grading session replaces a round trip per 
 Source and inputs at the top level; `dist/` is only ever things a render wrote, and is
 reconstructible from `src/` plus the scripts.
 
+**The footage does not have to live here.** A shoot is tens of gigabytes, which has no business in
+a synced folder or near a git remote, so `src/` and `dist/` resolve through a work directory:
+`$GRADE_WORK_DIR`, else a one-line `.workdir` file at the repo root (gitignored), else the repo
+itself. Clone it with nothing configured and it works self-contained; point `.workdir` at a media
+volume and the same scripts run unchanged. Everything else — code, docs, LUTs — stays in the repo.
+
 ```
 src/            Original camera files. NEVER modified or moved.
 scripts/        The pipeline itself. Stage scripts + LUT generators. Start at lib.sh.

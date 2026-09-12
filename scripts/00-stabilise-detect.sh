@@ -26,8 +26,9 @@ source "$SCRIPT_DIR/lib.sh"
 
 CLIP="$1"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-IN="$ROOT/dist/02-graded/${CLIP}_graded.mov"
-OUT_DIR="$ROOT/dist/stab"
+WORK="$(resolve_work_dir "$ROOT")"
+IN="$WORK/dist/02-graded/${CLIP}_graded.mov"
+OUT_DIR="$WORK/dist/stab"
 OUT="$OUT_DIR/${CLIP}.trf"
 
 [ -f "$IN" ] || { echo "graded master not found: $IN — run 02-grade.sh first" >&2; exit 1; }

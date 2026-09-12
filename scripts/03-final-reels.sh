@@ -8,8 +8,9 @@ source "$SCRIPT_DIR/lib.sh"
 CLIP="$1"
 SMOOTHING="${SMOOTHING:-30}"   # frames of camera-path lowpass; higher = closer to locked-off
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-IN="$ROOT/dist/02-graded/${CLIP}_graded.mov"
-OUT="$ROOT/dist/03-final/${CLIP}_reels-stories_9x16.mp4"
+WORK="$(resolve_work_dir "$ROOT")"
+IN="$WORK/dist/02-graded/${CLIP}_graded.mov"
+OUT="$WORK/dist/03-final/${CLIP}_reels-stories_9x16.mp4"
 
 [ -f "$IN" ] || { echo "graded master not found: $IN â€” run 02-grade.sh first" >&2; exit 1; }
 check_disk_space "$ROOT/dist" 2
@@ -32,7 +33,7 @@ require_portrait "$IN"   # refuses landscape rather than silently squashing it â
 # street-sign lettering. Holding the frame still stops the shimmer moving; hqdn3d below removes
 # what remains.
 STAB=""
-TRF="$ROOT/dist/stab/${CLIP}.trf"
+TRF="$WORK/dist/stab/${CLIP}.trf"
 if [ -f "$TRF" ]; then
 	STAB="vidstabtransform=input='${TRF}':smoothing=${SMOOTHING}:optzoom=1:interpol=bicubic,unsharp=5:5:0.2:3:3:0.0,"
 	echo "stabilising with $TRF (smoothing=${SMOOTHING})"

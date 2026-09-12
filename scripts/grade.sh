@@ -27,11 +27,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+WORK="$(resolve_work_dir "$ROOT")"
 
 CST="$ROOT/luts/apple/AppleLogToRec709-v1.0.cube"
 LOOK="$ROOT/luts/looks/kodak_portra_400_nc.cube"
-OUT_DIR="$ROOT/dist/03-final"
-WORK="$ROOT/dist/.grade-work"
+OUT_DIR="$WORK/dist/03-final"
+WORK="$WORK/dist/.grade-work"
 
 # --- the frozen look. Change these only to change the look for every clip, everywhere. ---
 SAT="1.27"; WARM="0.005"
@@ -103,7 +104,7 @@ print('%.3f' % max(1.2, min(3.2, g*math.log(r)/math.log(y))))")
 	# --- stabilisation: detect on the SOURCE, so no intermediate is needed ---------------
 	SFX=""
 	if [ "$STAB" = "1" ]; then
-		TRF="$ROOT/dist/stab/${CLIP}.trf"
+		TRF="$WORK/dist/stab/${CLIP}.trf"
 		if [ ! -f "$TRF" ] && [ "$DRY" != "1" ]; then
 			mkdir -p "$(dirname "$TRF")"
 			ffmpeg -v error -y -i "$SRC" -vf "lut3d=file='${CST}':interp=tetrahedral${FIX},vidstabdetect=shakiness=5:accuracy=15:stepsize=6:result=${TRF}.partial" -f null -

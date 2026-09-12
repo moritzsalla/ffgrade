@@ -114,8 +114,12 @@ setup() {
 	# prints a single line, so it cannot exercise the dedup at all. Verified by mutation: with
 	# the dedup removed, a synthetic-fixture version of this test still passed. Real file: 3
 	# lines. Synthetic: 1.
-	local real="$BATS_TEST_DIRNAME/../src/IMG_0609.mov"
-	[ -f "$real" ] || skip "no real source clip available"
+	# Footage lives under the work dir, which is NOT the repo when media is kept outside it
+	# (see scripts/lib.sh resolve_work_dir). Resolve it the same way the pipeline does.
+	local work real
+	work=$(resolve_work_dir "$BATS_TEST_DIRNAME/.." 2>/dev/null) || work="$BATS_TEST_DIRNAME/.."
+	real=$(ls "$work"/src/*.mov 2>/dev/null | head -1)
+	[ -n "$real" ] && [ -f "$real" ] || skip "no source footage in $work/src"
 	# Guard the guard: confirm the raw output really is multi-line, or this test proves nothing.
 	local raw
 	raw=$(ffprobe -v error -select_streams v:0 \
@@ -127,8 +131,12 @@ setup() {
 }
 
 @test "verify_bt709 gives a verdict (not a parse artefact) on a REAL camera file" {
-	local real="$BATS_TEST_DIRNAME/../src/IMG_0609.mov"
-	[ -f "$real" ] || skip "no real source clip available"
+	# Footage lives under the work dir, which is NOT the repo when media is kept outside it
+	# (see scripts/lib.sh resolve_work_dir). Resolve it the same way the pipeline does.
+	local work real
+	work=$(resolve_work_dir "$BATS_TEST_DIRNAME/.." 2>/dev/null) || work="$BATS_TEST_DIRNAME/.."
+	real=$(ls "$work"/src/*.mov 2>/dev/null | head -1)
+	[ -n "$real" ] && [ -f "$real" ] || skip "no source footage in $work/src"
 	# Source footage is bt2020-tagged, so this must FAIL — and fail with the tag message, not
 	# because the comparison tripped over multi-line output.
 	run verify_bt709 "$real"

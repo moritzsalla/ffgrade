@@ -24,7 +24,8 @@ source "$SCRIPT_DIR/lib.sh"
 
 CLIP="$1"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-BASELINE="$ROOT/dist/01-baseline/${CLIP}_baseline.mov"
+WORK="$(resolve_work_dir "$ROOT")"
+BASELINE="$WORK/dist/01-baseline/${CLIP}_baseline.mov"
 LUT="$ROOT/luts/looks/kodak_portra_400_nc.cube"
 TONE="$ROOT/luts/tone/shipped.cube"
 # Graded by eye in the Grade Bench (bench), calibrated live against the RAL references in
@@ -39,7 +40,7 @@ TONE="$ROOT/luts/tone/shipped.cube"
 #  shadow control here.)
 SAT="1.27"
 WARM="0.005"
-OUT="$ROOT/dist/02-graded/${CLIP}_graded.mov"
+OUT="$WORK/dist/02-graded/${CLIP}_graded.mov"
 
 [ -f "$BASELINE" ] || { echo "baseline not found: $BASELINE — run 01-baseline.sh first" >&2; exit 1; }
 check_disk_space "$ROOT/dist" 10

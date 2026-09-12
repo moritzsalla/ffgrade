@@ -13,9 +13,10 @@ source "$SCRIPT_DIR/lib.sh"
 CLIP="$1"
 ROTATE_FIX="${2:-none}"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SRC="$ROOT/src/${CLIP}.mov"
+WORK="$(resolve_work_dir "$ROOT")"
+SRC="$WORK/src/${CLIP}.mov"
 LUT="$ROOT/luts/apple/AppleLogToRec709-v1.0.cube"
-OUT="$ROOT/dist/01-baseline/${CLIP}_baseline.mov"
+OUT="$WORK/dist/01-baseline/${CLIP}_baseline.mov"
 
 [ -f "$SRC" ] || { echo "source not found: $SRC" >&2; exit 1; }
 # Apple's CST is NOT in this repo — it is not redistributable (see luts/apple/SOURCE.txt). On a

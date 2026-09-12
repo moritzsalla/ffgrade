@@ -107,6 +107,30 @@ require_portrait() {
 	fi
 }
 
+# Where the MEDIA lives. The repo holds code, docs and LUTs (~34MB, fine to sync and push); src/
+# and dist/ hold ~29GB of camera originals and renders, which must not sit in an iCloud-synced
+# folder or anywhere near a git remote.
+#
+# Resolution order: $GRADE_WORK_DIR, then a `.workdir` file at the repo root (gitignored, one
+# path, no quotes), then the repo itself — so a self-contained checkout with src/ and dist/ inside
+# it still works with no configuration at all.
+resolve_work_dir() {
+	local root="$1" w=""
+	if [ -n "${GRADE_WORK_DIR:-}" ]; then
+		w="$GRADE_WORK_DIR"
+	elif [ -f "$root/.workdir" ]; then
+		w=$(sed -e 's/[[:space:]]*$//' -e '/^[[:space:]]*#/d' "$root/.workdir" | head -1)
+		case "$w" in "~"*) w="$HOME${w#\~}";; esac
+	fi
+	[ -n "$w" ] || w="$root"
+	if [ ! -d "$w" ]; then
+		echo "work directory does not exist: $w" >&2
+		echo "  set GRADE_WORK_DIR, or put the path in $root/.workdir" >&2
+		return 1
+	fi
+	printf '%s\n' "$w"
+}
+
 require_nonempty() {
 	local file="$1"
 	local label="$2"
