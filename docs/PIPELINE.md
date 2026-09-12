@@ -28,15 +28,9 @@ tree above it was wrong. `CONTEXT.md` carries which word means what.
 
 Purely technical, zero creative judgment:
 
-- **No rotation.** Orientation is an ingest concern and the source is trusted; see
-  `docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md`. This stage applies no rotation and accepts
-  no rotation argument. The single guard lives in the delivery stage, where `require_portrait`
-  decodes a frame and measures it, refusing a landscape clip rather than squashing it.
-
-  Kept because it cost real time: iPhone ProRes carries rotation as a QuickTime display-matrix
-  flag, not pixel-level rotation, and ffmpeg autorotates on decode. A manual `transpose` therefore
-  fights the auto-correction and double-rotates — two attempts both produced landscape-looking
-  garbage. That is why the pipeline reasons about a decoded frame and never about a display matrix.
+- **No rotation.** This stage applies no rotation and accepts no rotation argument; the single
+  guard lives in the delivery stage. `docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md` carries
+  why, what it cost to learn, and what the guard actually measures, and is the only copy of it.
 - **Apple Log → Rec.709.** Apple's own 65³ LUT (`luts/apple/AppleLogToRec709-v1.0.cube`), not a
   hand-rolled curve — the log transfer function is proprietary and ffmpeg has no built-in support
   for it. `interp=tetrahedral` (more accurate than trilinear, worth the extra render time on a
@@ -49,7 +43,9 @@ Purely technical, zero creative judgment:
   fast `-c copy` remux pass immediately after encoding, setting the tags then — remuxing (not
   re-encoding) reliably writes them. **Always verify with `ffprobe -show_entries
   stream=color_space,color_transfer,color_primaries` after every encode of this pipeline** —
-  don't assume flags passed to an encoder landed.
+  don't assume flags passed to an encoder landed. First found on `prores_ks`, it recurred on
+  `libx264` too: assume every encoder in this pipeline needs the post-encode verification, not
+  just the ProRes stages.
 - **White balance.** Checked, not assumed: sampled the road (a real neutral reference in this
   shot) at full resolution → R174.0 G176.2 B176.7, within ~1.5% — effectively neutral, no
   correction applied. (An earlier visual read off a downscaled thumbnail suggested a warm cast;
@@ -181,22 +177,18 @@ expense of another.
   `.mov` masters carry a QuickTime timecode data track; mp4 has no slot for it. Remuxing a mov
   into mp4 (or re-tagging one) needs explicit `-map 0:v:0 -map 0:a:0`, not a blanket `-map 0`.
 - **ffmpeg's `curves` filter interpolates with a cubic spline, not straight lines between
-  control points.** A shape with more than ~3 points and uneven slope between segments can
-  overshoot past identity in a region you didn't intend to touch — found when a 5-point shadow
-  correction made the graded frame *brighter* than the uncorrected version. Always measure the
-  actual result (YAVG or similar) after any `curves` change, don't trust the control points alone
-  to predict the outcome. Fewer points, one bend at a time, is safer than a shape trying to do
-  several things at once.
+  control points**, so a shape with more than ~3 points and uneven slope can overshoot past
+  identity somewhere you didn't intend. Measure the actual result after any `curves` change;
+  the control points don't predict it. Measured under "Diagnosing 'too bright'" above.
 - **The hardening scripts themselves shipped with two bugs — both found only by running them.**
   (a) macOS ships **bash 3.2**, where expanding an *empty* array (`"${arr[@]}"`) under `set -u`
   raises "unbound variable". `safe_retag` took optional trailing args as an array, so every call
   without extra args died — silently blocking the very retag the function exists to perform, and
   leaving a freshly encoded master untagged. Fixed by passing `"$@"` straight through, which
   expands to nothing safely on 3.2. (b) `verify_bt709` compared ffprobe's output against a single
-  expected line, but ffprobe prints the video stream **twice** for these files (once inside
-  `[STREAM_GROUP]`, once as a top-level `[STREAM]`) plus a blank line — so it would have reported
-  failure on every correctly tagged file once (a) was fixed. Fixed by reading the first non-empty
-  line. Lesson: a safety check that has never actually run is not a safety check — exercise each
+  expected line, which a file from this camera can never match — see "ffprobe lies about these
+  files" below for the mechanism and the fix. It would have reported failure on every correctly
+  tagged file once (a) was fixed. Lesson: a safety check that has never actually run is not a safety check — exercise each
   one against both a passing and a failing input before trusting it.
 - **The Rec.709 tag bug isn't ProRes-specific.** First found on `prores_ks`, it recurred on
   `libx264` too — assume every encoder in this pipeline needs the post-encode tag verification,
@@ -368,10 +360,11 @@ them.
   level down to the pivot; contrast then shapes rather than lifts.
 - **`colorlevels` and `eq` are unusable here** (see below), so tonal work is `curves`/`lut1d` only.
 
-## ffprobe lies about these files in two specific ways
+## ffprobe lies about these files in three specific ways
 
-The camera writes a `[STREAM_GROUP]` structure, and two ordinary ffprobe idioms break on it. Both
-fail SILENTLY — no error, just a wrong answer.
+The camera writes a `[STREAM_GROUP]` structure, and three ordinary ffprobe idioms break on it. All
+three fail SILENTLY — no error, just a wrong answer. This section is the only copy; everything
+else in these docs points here.
 
 1. **`-select_streams a:0` returns nothing, on every clip, despite the audio being there.**
    Verified: the selector yields an empty result while an unfiltered query plainly shows
@@ -386,8 +379,16 @@ fail SILENTLY — no error, just a wrong answer.
    top-level) plus a blank line. Comparing that output to one expected line always fails — which
    is exactly how `verify_bt709` shipped broken. Take the first non-empty line.
 
+3. **csv output carries a trailing comma** (`3840,2160,`), so `${dims##*,}` comes back empty and
+   the numeric comparison that depends on it fails open. This is how the portrait guard shipped
+   accepting landscape clips, and how `probe_tags` returned `bt709,bt709,bt709,` and left
+   `verify_bt709` unable to pass on a camera-structured file however it was tagged. The comma
+   appears on camera originals and on `-c copy` excerpts of them, but not on the pipeline's own
+   re-encodes, so it stays hidden until real footage reaches it. Query one field at a time with
+   `-of default=nw=1:nk=1` and validate the answer with a regex.
+
 Rule for this footage: never trust a single-line ffprobe answer without checking what it actually
-printed. Both bugs cost real time and neither announced itself.
+printed. All three cost real time and none announced itself.
 
 ## Measurement cookbook
 
@@ -430,9 +431,8 @@ ffprobe -v error -select_streams v:0 \
   -show_entries stream=color_space,color_transfer,color_primaries,color_range -of csv=p=0 FILE
 ```
 
-Note this prints the stream **twice** for these files (once in `[STREAM_GROUP]`, once top level)
-plus a blank line — a script comparing the raw output to one expected line always fails. Take the
-first non-empty line.
+Read "ffprobe lies about these files" below before scripting against this output. Both of the
+guards that shipped broken did so by trusting it raw.
 
 **Which pixel format a filter chain actually negotiates** — how the silent 8-bit downconversion was
 found:
@@ -508,7 +508,10 @@ Verified safe (10-bit preserved, measured):
 Rule: before using any *new* filter here, check `-v debug` for an auto-inserted 8-bit conversion
 and measure the result. Two of the first three filters reached for turned out to be unusable.
 
-## Why the footage looks flat: the white balance cancelled golden hour
+## The locked white balance neutralised golden hour
+
+This section is about the missing *warmth*, not about the flatness — the flatness is tone, settled
+under "What they proved" above, and the colour was never broken.
 
 IMG_0609 was captured at `18:02:29Z` = **20:02 local** (Amsterdam, `+52.385+004.859`), on 11 Sept
 — sunset ≈20:25. That is golden-hour light, and the footage should carry it. It doesn't.
@@ -528,10 +531,11 @@ Cross-check: the road (a true neutral reference) measured R174.0 G176.2 B176.7 �
 **cool**, in warm evening light. Warm light must not measure cool.
 
 Conclusion: **the locked white balance neutralised the golden-hour warmth at capture.** That is
-what a locked WB does — it compensates the scene to neutral. Not a pipeline bug; it's baked into
-the footage, and the grade has to put the warmth back rather than "preserve" it. For future
-shoots: locking WB warm (or shooting a grey reference and locking to it deliberately) keeps the
-golden-hour character instead of cancelling it.
+what a locked WB does: it compensates the scene to neutral. Not a pipeline bug, and the resulting
+balance is colorimetrically correct — which is why adding warmth back is a **creative departure**
+and not a correction. "A theory this disproved" above is where the correction reading was tested
+and rejected. For future shoots: locking WB warm, or shooting a grey reference and locking to it
+deliberately, keeps the golden-hour character instead of cancelling it.
 
 Also worth knowing, from the same measurements: the sky (`crop=400:300:1600:100`) reads
 YMAX 819 (**not clipped** — there's headroom), but VAVG 528 / SATAVG 22, i.e. slightly *warm*,

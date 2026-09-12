@@ -57,11 +57,10 @@ The Bench is a browser tool for setting the look by eye. Export a frame, drop it
 and the image updates instantly — no render round-trip. The calibration readouts sit beside the
 sliders so you can see when a change pushes a known colour off its spec.
 
-**Paste the current `look.json` into the Bench's load panel before you start.** The sliders then
-open on the shipped look rather than generic defaults, and the blocks the Bench does not edit
-(`grain`, `stabilisation`, `match`) are carried through into its output. Skip it and the emitted
-file is incomplete, which stops every stage on the first missing key — `look()` has no fallbacks,
-deliberately, because a silent substitution would be a different look.
+**Paste the current `look.json` into the Bench's load panel before you start**, or the emitted
+file comes back incomplete and every stage stops on the first missing key. `look()` has no
+fallbacks, deliberately, because a silent substitution would be a different look. The full
+grading-session procedure is in `docs/BATCH_RUNBOOK.md`.
 
 When it looks right, hit **Send grade** and the settings come back as `look.json`, the single
 source every stage reads. Change that file and the tone LUT regenerates itself on the next run:
@@ -140,8 +139,7 @@ luts/
 look.json       The look. One source, every stage reads it.
 docs/           PIPELINE.md is the real documentation.
   BATCH_RUNBOOK.md  per-clip procedure, and which calls are not safe to automate
-  SHOOTING_SETUP.md how to shoot for this pipeline — prescriptive, read before a shoot
-  SHOOTING_RETRO.md what this shoot got wrong — retrospective, read before the next one
+  SHOOTING_SETUP.md how to shoot for this pipeline, and what the first shoot measured
   adr/            decisions that would be expensive to reverse, with the measurements
 tests/          bats suite + the curve parity check.
 CONTEXT.md      What each word means here.

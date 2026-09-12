@@ -4,7 +4,7 @@ The mechanical steps (LUT application, tag fixing, encoding) are scripted in `sc
 The judgment calls below are NOT scripted — they can't be safely automated in a blind loop and
 need a preview frame actually looked at, per clip. White balance and the Feed crop each have a
 per-clip answer, and each has already been got wrong by assuming the previous clip's
-(see docs/PIPELINE.md, "Mistakes made", and "Orientation is an ingest concern" below).
+(see docs/PIPELINE.md, "Mistakes made", and ADR 0005 on orientation).
 
 ## Per-clip procedure
 
@@ -77,27 +77,16 @@ one.
 fine gradients look slightly rougher than the 10-bit render; and objects in shade read darker and
 less saturated than their RAL spec, so the references are hue and ratio guides, not exposure ones.
 
-## Orientation is an ingest concern
+## Orientation
 
-The pipeline contains no rotation logic and does not try to fix orientation. It assumes the source
-plays the right way up, which is the same assumption an NLE makes.
-
-The one guard it keeps: `require_portrait` decodes a frame and measures it, refusing anything that
-is not portrait before it can be silently squashed into 1080x1920. It measures the decoded frame
-rather than reading metadata, so it does not care whether orientation was corrected by re-encoding
-or by fixing the display matrix (Preview and QuickTime both do the latter, which is the lossless
-option and is honoured by ffmpeg's autorotate).
-
-Historical note worth keeping, because it cost real time: this shoot arrived with 11 clips that had
-**no rotation matrix at all** — portrait content sitting in a 3840x2160 container, lying on its
-side. A sideways portrait frame reads as a landscape composition in any file listing, so it was
-diagnosed as "landscape footage needing a crop decision" and blocked the batch for hours. Rendering
-a single frame would have settled it immediately. When geometry looks strange, look at a picture
-before reasoning about metadata.
+The pipeline contains no rotation logic and assumes the source plays the right way up. The one
+guard, `require_portrait`, refuses a non-portrait clip in the delivery stage rather than letting it
+be squashed into 1080x1920. The reasoning, and the mixed-orientation episode that blocked this
+shoot's batch for hours, are in `docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md`, which is the
+only copy.
 
 ## What's safe to batch, what isn't
 
 Safe to loop unattended: the mechanical stages, given a proof that has been signed off. What is
-never safe to batch is the Feed crop, because its offset is a composition call per clip — so
-`grade.sh` refuses `FEED=1` across several clips unless `CROP_Y` is passed deliberately. This
-pipeline is "scripted mechanics, per-clip human gate," not "point at 18 files and walk away."
+never safe to batch is the Feed crop, because its offset is a composition call per clip; step 5
+above says what `grade.sh` does about that. This pipeline is "scripted mechanics, per-clip human gate," not "point at 18 files and walk away."

@@ -58,7 +58,7 @@ If a shot really wants to be horizontal, that's fine — just know it's a differ
 won't come out of the vertical batch.
 
 **Leave a little space top and bottom** if the shot might also be used as a square-ish feed post —
-that crop cuts the top and bottom off.
+that crop cuts the top and bottom off. Nothing essential in the top or bottom sixth.
 
 ---
 
@@ -67,7 +67,8 @@ that crop cuts the top and bottom off.
 **Put something with a known colour in one shot per location.** A parked car's yellow numberplate,
 a red or blue road sign. These have legally fixed colours, which lets the grading be checked
 against something real instead of guessed at. It costs ten seconds and it's the single most useful
-thing you can do for the result.
+thing you can do for the result. A grey card, or any known-neutral surface, in one frame per setup
+does the same for white balance: it turns a judgement into a measurement.
 
 **If you want that warm golden-hour glow, lock white balance while pointing somewhere shaded.**
 
@@ -121,3 +122,46 @@ including which clips it skipped and why.
 - [ ] White balance locked
 - [ ] Phone held vertically
 - [ ] Something with a known colour in one shot
+
+---
+
+## What the first shoot measured
+
+Everything above is a rule. This is the evidence for it, from grading the 11 Sept shoot, and none
+of it was fixable afterwards — which is what makes the five minutes of setup worth it.
+
+**ProRes 422 HQ + Apple Log at 4K24 was the right call.** Log carries linear values up to 12×
+diffuse white, roughly 3.6 stops of headroom above white, and this shoot used about 5.4× of it.
+That headroom is the raw material the grade shapes; a normal Rec.709 capture throws it away in the
+phone.
+
+**Locking white balance cost the golden hour.** IMG_0609 was shot at 20:02 local, about twenty
+minutes before sunset. The footage does not look like it, and that is the lock working exactly as
+designed: it compensates the scene to neutral, cancelling the warm light along with any cast.
+Measured, the road — a true neutral reference — read R174 G176 B177, very slightly *cool*, in warm
+evening light. The result is colorimetrically correct and the grade can put warmth back, but it was
+a choice being made without realising it. Locked rather than auto is still right either way,
+because it keeps every clip in the shoot consistent and one grade then transfers across all of
+them. Auto would drift shot to shot and each clip would need its own correction.
+
+**Mixed orientation broke the batch.** The shoot came back three ways:
+
+| Rotation matrix | Clips | Presents as |
+|---|---|---|
+| none | IMG_0607, 0608, 0610–0618 (11) | 3840×2160 **landscape** |
+| −90° | IMG_0619–0625 (7) | 2160×3840 portrait |
+| +90° | IMG_0609 (1) | 2160×3840 portrait |
+
+Eleven clips could not go to 9:16 without discarding roughly two-thirds of the frame width. The
+pipeline refuses those now; before it did, one was silently squashed into a vertical frame and
+produced convincing-looking garbage. The full episode is in
+`docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md`.
+
+**Erring darker worked.** The brightest areas peaked at YMAX 854 of 1023 in the source, comfortably
+unclipped, which left room to shape. Keep doing that.
+
+**The standardised colours did the most work of anything on this list.** A Dutch licence plate
+(RAL 1021), a traffic-red 30 ring (RAL 3020) and a traffic-blue parking sign (RAL 5017) all
+happened to be in shot, and they became the entire calibration basis for the grade — see
+`docs/PIPELINE.md`. They also disproved several confident-but-wrong judgements made by eye. In a
+location without signage, shoot one frame with something of known colour in it.

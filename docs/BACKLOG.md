@@ -11,8 +11,7 @@ that is judged, the other 18 clips should not be rendered against it.
 
 **Run the remaining 18 clips.** Per-clip procedure in `docs/BATCH_RUNBOOK.md`. One thing there is
 per-clip and must not be inherited from IMG_0609: the Feed crop offset, since 750 is this clip's
-composition only. `grade.sh` now refuses `FEED=1` across several clips unless `CROP_Y` is passed
-deliberately, so that can no longer happen by accident.
+composition only.
 
 ## Worth doing next
 
