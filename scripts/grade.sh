@@ -68,24 +68,13 @@ OK=0; SKIPPED=0
 for SRC in "${CLIPS[@]}"; do
 	CLIP="$(basename "${SRC%.*}")"
 
-	# --- rotation class. The matrix predicts it; no eyeballing needed. -------------------
-	# `|| true` is load-bearing: grep exits 1 when a clip has NO rotation matrix, and under
-	# `set -e` that aborts the whole run on the first such clip, silently, with exit 1 and no
-	# message. Most of this shoot has no matrix, so it fails on clip one.
-	#
-	# A MISSING matrix does not mean landscape footage. It means portrait content stored as
-	# 3840x2160 with the flag absent — ffmpeg has nothing to autorotate by, so the frame stays
-	# sideways, and a sideways portrait frame reads as a landscape composition. These clips were
-	# skipped as "needing a framing decision" for a while; they need transpose=1 and nothing else.
-	# Confirmed by rendering five of them. See docs/BATCH_RUNBOOK.md, "Mixed orientation".
-	ROT=$(ffprobe -v error -select_streams v:0 -show_entries stream_side_data=rotation \
-		-of csv=p=0 "$SRC" 2>/dev/null | grep -v '^[[:space:]]*$' | head -1 || true)
-	case "${ROT:-none}" in
-		90)   FIX=",vflip,hflip" ;;   # +90: autorotate lands it upside down
-		-90)  FIX="" ;;               # -90: autorotate alone is correct
-		none) FIX=",transpose=1" ;;   # no matrix: portrait stored as landscape
-		*)    say "SKIP  $CLIP — unexpected rotation '$ROT'"; SKIPPED=$((SKIPPED+1)); continue ;;
-	esac
+	# Rotation is the source's business, not ours — see scripts/normalise-rotation.sh. Refuse a
+	# clip that would render sideways rather than producing a confidently wrong file.
+	if ! require_portrait "$SRC" 2>/dev/null; then
+		say "SKIP  $CLIP — displays as $(display_dims "$SRC" | tr ' ' x), not portrait. Fix rotation first."
+		SKIPPED=$((SKIPPED+1)); continue
+	fi
+	FIX=""
 
 	# --- exposure match: one cheap probe, not a full pass --------------------------------
 	GAMMA="$G_GAMMA_REF"; YAVG="-"

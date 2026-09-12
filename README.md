@@ -1,5 +1,7 @@
 # ffgrade
 
+Grading tool to grade iPhone ProRes \* Apple log footage. Gets the absolute best image quality out of iPhone footage that is possible to achieve.
+
 **Apple Log → graded Rec.709 in one ffmpeg pass.** 10-bit preserved to delivery, tone curve applied
 to luma only, LUTs generated rather than guessed. No NLE.
 
@@ -19,9 +21,9 @@ Getting that out of it is a tone problem, and tone is something ffmpeg can do pr
 
 ![The Grade Bench](docs/grade-bench.png)
 
-*The Grade Bench: set the look by eye at interactive speed, with the calibration references reading
+_The Grade Bench: set the look by eye at interactive speed, with the calibration references reading
 live beside the sliders. Its curve maths is a port of the renderer's, and a test asserts they stay
-in step — if the preview stops predicting the render, something says so before the footage does.*
+in step — if the preview stops predicting the render, something says so before the footage does._
 
 ## Scope, honestly
 
@@ -45,7 +47,7 @@ The findings that cost the most time, each reproducible from `docs/PIPELINE.md`:
 - **`format=yuv420p` and `-sws_dither ed` are byte-identical** — i.e. neither dithers. Only
   `zscale` actually does the 10→8 bit reduction properly.
 - **Per-pixel grain does not survive delivery.** Re-encoded at ~4 Mbps the compressor smears it
-  into blobs. Grain generated at half resolution keeps its structure *and* encodes ~22% cheaper.
+  into blobs. Grain generated at half resolution keeps its structure _and_ encodes ~22% cheaper.
 - **The free film-emulation LUTs are all 13³ grids** supplying colour character and almost no
   contrast. The tone stage exists because of that, not despite it.
 - **I spent hours "fixing" colour that was already correct.** Apple's CST lands the standardised
@@ -69,10 +71,10 @@ is in fact heavily processed; Log hands that processing back as a choice.
 **Calibrating against colours that are legally defined** is how the arguments got settled. Not the
 point of the tool, but the reason I trust its numbers.
 
-| | |
-|---|---|
-| ![Traffic signs](docs/reference-traffic-signs.png) | ![Licence plate](docs/reference-licence-plate.png) |
-| Dutch traffic signage — RAL 3020 red, RAL 5017 blue | Dutch plate yellow — RAL 1021 |
+|                                                     |                                                    |
+| --------------------------------------------------- | -------------------------------------------------- |
+| ![Traffic signs](docs/reference-traffic-signs.png)  | ![Licence plate](docs/reference-licence-plate.png) |
+| Dutch traffic signage — RAL 3020 red, RAL 5017 blue | Dutch plate yellow — RAL 1021                      |
 
 The frame gets sampled at objects with published specs — plate yellow (RAL 1021), traffic red
 (RAL 3020), traffic blue (RAL 5017) — plus any neutral surface. That turns "does this look right"
@@ -81,8 +83,8 @@ judgements I'd made by eye and got wrong.
 
 ![Grade ladder](docs/grade-ladder-variants.png)
 
-*A strength ladder: one frame at four points along a single parameter. Every decision in
-`docs/PIPELINE.md` was settled like this — the comparison and the measurement together.*
+_A strength ladder: one frame at four points along a single parameter. Every decision in
+`docs/PIPELINE.md` was settled like this — the comparison and the measurement together._
 
 **Accuracy is not a grade, though.** The references tell you where you are, not where to go. The
 look I ship is deliberately off-spec — saturation 1.27 puts the blue at 2.39 against a 1.98 spec.
@@ -143,8 +145,8 @@ CONTEXT.md        The project's own vocabulary, one term per concept, and the wo
   measurements — including two bugs in the safety scripts themselves, an ffmpeg filter that
   silently drops the pipeline to 8-bit, and a "fix" that made the image measurably worse.
 - **Read `CONTEXT.md`** if you are going to write anything down. Several of these words mean two
-  things in ordinary speech and exactly one here — *look* is not *tone* is not *grade*, *spec* is
-  not *target*, and a *baseline* is not a *master*. Some file and variable names still carry the
+  things in ordinary speech and exactly one here — _look_ is not _tone_ is not _grade_, _spec_ is
+  not _target_, and a _baseline_ is not a _master_. Some file and variable names still carry the
   ruled-out word; CONTEXT.md says which.
 - **Run stages through `scripts/`,** not by hand. They carry exit-code checks, tag
   verification, disk-space checks and an orientation guard, each of which exists because its
@@ -164,7 +166,7 @@ either already failed in production or shipped broken and went unnoticed.
 Two things about this suite worth knowing before extending it:
 
 - **It has been mutation-tested.** Each guard was deliberately broken to confirm the matching test
-  goes red. That found two tests that passed against a *removed* guard — pure theatre — both
+  goes red. That found two tests that passed against a _removed_ guard — pure theatre — both
   because a synthetic fixture could not reproduce the condition (ffprobe repeats the video stream
   only for files with the camera's stream-group structure; a generated fixture prints one line).
   Those tests now use real footage from `src/` and skip if it is absent.

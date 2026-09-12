@@ -73,29 +73,23 @@ one.
 fine gradients look slightly rougher than the 10-bit render; and objects in shade read darker and
 less saturated than their RAL spec, so the references are hue and ratio guides, not exposure ones.
 
-## Mixed orientation — three classes, read off the file
+## Orientation is an ingest concern
 
-This shoot is not uniformly tagged, but the classes are machine-readable, so this is three checks
-rather than nineteen eyeball passes. `rotation_class` in `scripts/lib.sh` prints the right
-`ROTATE_FIX` for any clip:
+The pipeline contains no rotation logic and does not try to fix orientation. It assumes the source
+plays the right way up, which is the same assumption an NLE makes.
 
-| Rotation matrix | ROTATE_FIX | Clips | What is going on |
-|---|---|---|---|
-| −90° | `none` | IMG_0619–0625 (7) | autorotate already correct |
-| +90° | `180` | IMG_0609 (1) | autorotate lands it upside down |
-| **absent** | `cw` | IMG_0607, 0608, 0610–0618 (11) | portrait content stored as landscape with no flag |
+The one guard it keeps: `require_portrait` decodes a frame and measures it, refusing anything that
+is not portrait before it can be silently squashed into 1080x1920. It measures the decoded frame
+rather than reading metadata, so it does not care whether orientation was corrected by re-encoding
+or by fixing the display matrix (Preview and QuickTime both do the latter, which is the lossless
+option and is honoured by ffmpeg's autorotate).
 
-**The third class was misread for a long time as "landscape footage".** With no matrix, ffmpeg has
-nothing to rotate by, so the frame stays sideways — and a sideways portrait frame looks exactly
-like a landscape composition in a file listing. It was treated as a framing problem needing a crop
-decision, and it blocked the rest of the shoot. It is not: the content is portrait and the flag is
-simply missing. `transpose=1` fixes it, nothing is discarded, and no creative call is needed.
-
-The lesson is the cheap one: render a frame before reasoning about geometry. One `ffmpeg` call
-would have settled it at the start.
-
-The `require_portrait` guard in the export stages still earns its place — it catches a genuinely
-landscape master reaching a vertical deliverable, which would otherwise be squashed silently.
+Historical note worth keeping, because it cost real time: this shoot arrived with 11 clips that had
+**no rotation matrix at all** — portrait content sitting in a 3840x2160 container, lying on its
+side. A sideways portrait frame reads as a landscape composition in any file listing, so it was
+diagnosed as "landscape footage needing a crop decision" and blocked the batch for hours. Rendering
+a single frame would have settled it immediately. When geometry looks strange, look at a picture
+before reasoning about metadata.
 
 ## What's safe to batch, what isn't
 

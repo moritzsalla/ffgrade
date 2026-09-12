@@ -13,22 +13,6 @@ that is judged, the other 18 clips should not be rendered against it.
 are per-clip and must not be inherited from IMG_0609: the Feed crop offset (750 is this clip's
 composition only) and the rotation class.
 
-## Resolved
-
-**The "11 landscape clips" were never landscape.** They are portrait shots stored as 3840×2160
-with the rotation flag **missing entirely** — ffmpeg has nothing to autorotate by, so they stay
-sideways, and the sideways frame reads as a landscape composition. Rendering one made it obvious
-immediately; it had been reasoned about as a framing problem for far too long without anyone
-looking at a frame.
-
-They need `transpose=1`, not a crop. No footage is discarded and no creative decision is required.
-Confirmed on five of them. `rotation_class` in `scripts/lib.sh` now reads the class straight off
-the file, so the whole shoot classifies in one pass:
-
-    matrix -90  -> none   (autorotate is correct)     7 clips
-    matrix +90  -> 180    (autorotate lands upside down)  1 clip
-    no matrix   -> cw     (portrait stored as landscape)  11 clips
-
 ## Worth doing next
 
 **Externalise the look to a config file.** The shipped look is currently constants at the top of

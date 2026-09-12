@@ -94,90 +94,27 @@ check_disk_space() {
 # A vertical delivery script handed a landscape master will happily scale 3840x2160 into
 # 1080x1920 — no error, no warning, just a badly squashed file that looks "done". That is the
 # dangerous failure in a batch run, so refuse it here instead.
-# Reads the rotation class off the file, so nobody has to eyeball nineteen clips. Prints the
-# ROTATE_FIX value 01-baseline.sh should be given.
-rotation_class() {
-	local rot
-	rot=$(ffprobe -v error -select_streams v:0 -show_entries stream_side_data=rotation \
-		-of csv=p=0 "$1" 2>/dev/null | grep -v '^[[:space:]]*$' | head -1)
-	case "${rot:-none}" in
-		-90)  printf 'none\n' ;;   # autorotate handles it
-		90)   printf '180\n'  ;;   # autorotate lands upside down
-		none) printf 'cw\n'   ;;   # no matrix at all: portrait stored as landscape
-		*)    printf 'none\n' ;;
-	esac
-}
-
+# There is deliberately NO rotation logic in this pipeline — orientation is an ingest concern and
+# the source is trusted. This guard exists for one thing only: a genuinely landscape clip reaching
+# a vertical deliverable gets silently squashed into 1080x1920, and silent is the problem.
+#
+# So it decodes one frame and measures it, rather than reasoning about display matrices. ffmpeg
+# autorotates on decode, so this reflects what a viewer sees, and it does not care whether the
+# source was corrected by re-encoding or by fixing the matrix in Preview.
 require_portrait() {
-	local file="$1"
-	local dims w h
-	dims=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height \
-		-of csv=p=0 "$file" | grep -v '^[[:space:]]*$' | head -1)
-	w=${dims%%,*}
-	h=${dims##*,}
+	local file="$1" tmp w h
+	tmp="$(mktemp -t portrait).png"
+	if ! ffmpeg -v error -y -i "$file" -frames:v 1 "$tmp" 2>/dev/null; then
+		rm -f "$tmp"; echo "could not decode a frame from $file" >&2; return 1
+	fi
+	w=$(ffprobe -v error -show_entries stream=width -of default=nw=1:nk=1 "$tmp" | head -1)
+	h=$(ffprobe -v error -show_entries stream=height -of default=nw=1:nk=1 "$tmp" | head -1)
+	rm -f "$tmp"
 	if [ "$h" -le "$w" ]; then
-		echo "REFUSING: $file is ${w}x${h} (landscape)." >&2
-		echo "  Vertical delivery would silently squash it. A landscape clip needs a framing" >&2
-		echo "  decision first (centre-crop to vertical / pillarbox / exclude) — see" >&2
-		echo "  docs/BATCH_RUNBOOK.md, 'Mixed orientation'." >&2
+		echo "REFUSING: $file decodes as ${w}x${h}, not portrait." >&2
+		echo "  Vertical delivery would squash it. Fix the source orientation, then retry." >&2
 		return 1
 	fi
-}
-
-# Where the MEDIA lives. By DEFAULT that is the repo itself: src/ in, dist/ out, nothing to
-# configure — which is the arrangement someone cloning this expects to find. .gitignore keeps both
-# out of the index, by directory and by file extension, so footage in the working tree is safe.
-#
-# The indirection exists only for keeping footage on another volume, and is opt-in.
-#
-# Resolution order: $GRADE_WORK_DIR, then a `.workdir` file at the repo root (gitignored, one
-# path, no quotes), then the repo itself — so a self-contained checkout with src/ and dist/ inside
-# it still works with no configuration at all.
-# --- the look -----------------------------------------------------------------
-# One source for every look value: look.json at the repo root. Nothing else may hardcode one.
-# Before this existed, `SAT=1.27` was written out in two scripts and had already started to drift
-# in the obvious way — two copies, one edited.
-look() {  # look <jq-path> [fallback]
-	local key="$1" fallback="${2:-}" v
-	v=$(jq -r "$key // empty" "$LOOK_FILE" 2>/dev/null) || v=""
-	if [ -z "$v" ]; then
-		[ -n "$fallback" ] || { echo "look.json: missing $key and no fallback" >&2; return 1; }
-		v="$fallback"
-	fi
-	printf '%s\n' "$v"
-}
-
-# The shipped tone LUT is GENERATED from look.json's tone block. Regenerate whenever look.json is
-# newer, so the .cube can never silently disagree with the numbers that claim to describe it —
-# which is the same failure class as the Bench drifting from the renderer, one layer down.
-ensure_tone_lut() {
-	# Two lines, not one: bash expands the whole command line BEFORE `local` performs its
-	# assignments, so `local a="$1" b="$a"` sees an unset $a — and under `set -u` that aborts.
-	local root="$1"
-	local cube="$root/luts/tone/shipped.cube"
-	if [ -f "$cube" ] && [ "$cube" -nt "$LOOK_FILE" ]; then return 0; fi
-	echo "look.json is newer than shipped.cube — regenerating the tone curve"
-	"$root/scripts/make-tone-lut.py" "$cube" \
-		--gamma    "$(look .tone.gamma)"    --pivot  "$(look .tone.pivot)" \
-		--contrast "$(look .tone.contrast)" --toe    "$(look .tone.toe)" \
-		--shoulder "$(look .tone.shoulder)" --black  "$(look .tone.black)" >/dev/null
-}
-
-resolve_work_dir() {
-	local root="$1" w=""
-	if [ -n "${GRADE_WORK_DIR:-}" ]; then
-		w="$GRADE_WORK_DIR"
-	elif [ -f "$root/.workdir" ]; then
-		w=$(sed -e 's/[[:space:]]*$//' -e '/^[[:space:]]*#/d' "$root/.workdir" | head -1)
-		case "$w" in "~"*) w="$HOME${w#\~}";; esac
-	fi
-	[ -n "$w" ] || w="$root"
-	if [ ! -d "$w" ]; then
-		echo "work directory does not exist: $w" >&2
-		echo "  set GRADE_WORK_DIR, or put the path in $root/.workdir" >&2
-		return 1
-	fi
-	printf '%s\n' "$w"
 }
 
 require_nonempty() {
